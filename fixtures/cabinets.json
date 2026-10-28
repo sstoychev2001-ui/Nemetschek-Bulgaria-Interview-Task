@@ -1,0 +1,29 @@
+{
+  "cabinets": [
+    {
+      "name": "Invoices",
+      "displayName": "Invoices",
+      "fields": [
+        { "name": "InvoiceNumber", "label": "Invoice number", "type": "text", "maxLength": 20, "writable": true },
+        { "name": "Supplier", "label": "Supplier", "type": "text", "maxLength": 60, "writable": true },
+        { "name": "Amount", "label": "Amount", "type": "number", "writable": true },
+        { "name": "InvoiceDate", "label": "Invoice date", "type": "date", "writable": true },
+        { "name": "Batch", "label": "Batch", "type": "text", "maxLength": 100, "writable": true },
+        { "name": "Status", "label": "Status", "type": "text", "maxLength": 12, "writable": true },
+        { "name": "ApprovedBy", "label": "Approved by", "type": "text", "maxLength": 60, "writable": false }
+      ]
+    },
+    {
+      "name": "Contracts",
+      "displayName": "Contracts",
+      "fields": [
+        { "name": "ContractNumber", "label": "Contract number", "type": "text", "maxLength": 30, "writable": true },
+        { "name": "Party", "label": "Contract party", "type": "text", "maxLength": 100, "writable": true },
+        { "name": "SignedOn", "label": "Signed on", "type": "date", "writable": true },
+        { "name": "Value", "label": "Contract value", "type": "number", "writable": true },
+        { "name": "Notes", "label": "Notes", "type": "text", "maxLength": 255, "writable": true },
+        { "name": "Category", "label": "Category", "type": "text", "maxLength": 40, "writable": false }
+      ]
+    }
+  ]
+}

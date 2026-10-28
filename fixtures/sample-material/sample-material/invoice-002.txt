@@ -1,0 +1,3 @@
+Invoice 002
+Supplier: Contoso Paper
+Amount: 89.00

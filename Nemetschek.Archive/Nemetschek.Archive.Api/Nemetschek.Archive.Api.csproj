@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- HTTP surface only: endpoints, request/response DTOs, the single error shape, DI wiring and
+       OpenAPI. No archive rule belongs in this project — rules live in Core.
+       Shared build settings come from Directory.Build.props at the repository root. -->
+
+  <ItemGroup>
+    <!-- Microsoft.AspNetCore.OpenApi generates the OpenAPI document; SwaggerUI makes it browsable
+         while the service runs in its container, which the brief requires. -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.4" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="7.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nemetschek.Archive.Core\Nemetschek.Archive.Core.csproj" />
+    <ProjectReference Include="..\Nemetschek.Archive.Infrastructure\Nemetschek.Archive.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

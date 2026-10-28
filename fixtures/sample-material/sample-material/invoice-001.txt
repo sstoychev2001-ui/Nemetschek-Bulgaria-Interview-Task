@@ -1,0 +1,3 @@
+Invoice 001
+Supplier: Northwind Supplies
+Amount: 120.50
