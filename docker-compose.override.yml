@@ -1,10 +1,7 @@
-version: '3.4'
-
+# Applied automatically by `docker compose up`, so this file is the local development profile.
+# It exists to demonstrate the brief's requirement that the same image run with different settings:
+# nothing here is baked into the image.
 services:
-  api:
+  archive-api:
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://0.0.0.0:80
-      - PATH_BASE=/example
-    ports:
-      - "80:80"
+      ASPNETCORE_ENVIRONMENT: Development

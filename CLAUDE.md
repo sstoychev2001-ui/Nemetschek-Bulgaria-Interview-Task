@@ -1,7 +1,7 @@
 # Project instructions
 
 Take-home task: a small document archive (two .NET services + a web client, in containers).
-The authoritative brief is `TASK.md`. The fixtures in `Task/fixtures/` are given and not to be edited.
+The authoritative brief is `TASK.md`. The fixtures in `fixtures/` are given and not to be edited.
 
 ## Standing instruction: keep the documents current
 

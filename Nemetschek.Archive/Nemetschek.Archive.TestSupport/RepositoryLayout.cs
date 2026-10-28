@@ -1,12 +1,12 @@
 using System.Xml.Linq;
 
-namespace Nemetschek.Archive.Tests.Architecture;
+namespace Nemetschek.Archive.TestSupport;
 
 /// <summary>
 /// Locates files in the repository from a test run, so tests can assert on the real csproj files and
 /// the real fixtures instead of on copies that can drift.
 /// </summary>
-internal static class RepositoryLayout
+public static class RepositoryLayout
 {
     /// <summary>
     /// The repository root, found by walking up from the test assembly until Nemetschek.sln appears.
@@ -39,11 +39,19 @@ internal static class RepositoryLayout
             .Order(StringComparer.Ordinal)
             .ToList();
 
+    /// <summary>The names of the projects that are not test or test-support projects.</summary>
+    public static IEnumerable<string> ProductionProjects =>
+        ProjectFiles.Keys.Where(name =>
+            !name.EndsWith(".Tests", StringComparison.Ordinal) &&
+            !name.EndsWith(".TestSupport", StringComparison.Ordinal));
+
     private static IEnumerable<string> ItemsOf(string projectName, string itemName)
     {
-        Assert.True(
-            ProjectFiles.ContainsKey(projectName),
-            $"No project named '{projectName}' found under {Root.FullName}.");
+        if (!ProjectFiles.ContainsKey(projectName))
+        {
+            throw new InvalidOperationException(
+                $"No project named '{projectName}' found under {Root.FullName}.");
+        }
 
         return XDocument.Load(ProjectFiles[projectName])
             .Descendants(itemName)

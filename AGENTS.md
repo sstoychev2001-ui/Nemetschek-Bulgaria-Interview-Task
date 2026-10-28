@@ -17,21 +17,32 @@ One top-level directory per service, with that service's projects directly insid
 ```
 TASK.md  README.md  AGENTS.md  DECISIONS.md  CLAUDE.md   the brief and the docs
 docs/                                                    per-feature requirement notes
-Task/fixtures/                                           cabinets.json, sample-material.zip (given, do not edit)
+fixtures/                                                cabinets.json, sample-material/ (given, do not edit)
 Nemetschek.sln                                           one solution, covers every service
 global.json  Directory.Build.props                       SDK pin and shared build settings
 docker-compose.yml  docker-compose.override.yml  .env    _(skeleton; rewritten when the service is containerised)_
 Nemetschek.Archive/
 ├── Nemetschek.Archive.Api/              endpoints, DTOs, error shape, DI, OpenAPI
 ├── Nemetschek.Archive.Core/             the rules — NO external dependencies
-│   ├── Cabinets/   Cabinet, IndexField, FieldType, IndexValue, IndexFieldRules, FieldViolation
-│   ├── Ports/      ICabinetCatalog  (+ IDocumentStore, IContentStore _(planned)_)
-│   ├── Upload/     _(planned)_ PlanUpload — the folder-to-document mapping
-│   └── Documents/  _(planned)_ Document, Part, query contracts
-├── Nemetschek.Archive.Infrastructure/   adapters: cabinets.json loader, stores _(planned)_
-└── Nemetschek.Archive.Tests/            one test project for the service
+│   ├── Domain/     one folder per domain entity type
+│   │   ├── Cabinets/      Cabinet
+│   │   ├── IndexFields/   IndexField, FieldType, IndexValue, IndexFieldRules, FieldViolation
+│   │   ├── Documents/     _(planned)_ Document, Part
+│   │   └── Uploads/       _(planned)_ PlanUpload — the folder-to-document mapping
+│   └── Ports/      ICabinetCatalog  (+ IDocumentStore, IContentStore _(planned)_)
+├── Nemetschek.Archive.Infrastructure/   adapters
+│   └── Cabinets/   CabinetsFileLoader, CabinetsFileDto, CabinetCatalog
+├── Nemetschek.Archive.Core.Tests/            one test project per production project
+├── Nemetschek.Archive.Infrastructure.Tests/
+├── Nemetschek.Archive.Api.Tests/        also holds the solution-wide architecture tests
+└── Nemetschek.Archive.TestSupport/      shared test helpers: RepositoryLayout, TestCabinets
 Nemetschek.Export/                       _(planned)_ same shape
 ```
+
+**One test project per production project**, named `<Project>.Tests` and referencing only its subject
+plus `TestSupport`. Shared test helpers go in `TestSupport`, which has no test-framework dependency.
+Both rules are enforced: `Each_test_project_references_the_project_it_tests` and
+`No_production_project_references_a_test_project`.
 
 Project references: `Api → Infrastructure → Core`, and `Api → Core`. **`Core` references nothing** —
 no NuGet packages, no other project.
@@ -40,7 +51,7 @@ Nothing under `Nemetschek.Archive.*` may reference `Nemetschek.Export.*`, or the
 service reaches the Archive over HTTP only, with its own client DTOs. That duplication is deliberate.
 
 **These rules are enforced by tests, not by trust** — see
-`Nemetschek.Archive.Tests/Architecture/ProjectDependencyTests.cs`. It reads the real csproj files, so a
+`Nemetschek.Archive.Api.Tests/Architecture/ProjectDependencyTests.cs`. It reads the real csproj files, so a
 cross-layer or cross-service reference fails `dotnet test`. If one of those tests fails, the fix is
 almost always to move the code, not to change the test.
 
@@ -55,13 +66,17 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
 
 | Rule | Where |
 |---|---|
-| Cabinet and field definitions | `Task/fixtures/cabinets.json`, loaded read-only by Infrastructure |
-| Field type / maxLength / writable enforcement | `Core/Cabinets/IndexFieldRules.cs` — the only place |
+| Cabinet and field definitions | `fixtures/cabinets.json`, loaded once at startup by `Infrastructure/Cabinets/CabinetsFileLoader.cs` |
+| What makes a cabinets.json file invalid | `Infrastructure/Cabinets/CabinetsFileDto.cs` — DataAnnotations attributes and `IValidatableObject` on the DTOs themselves. Fatal at startup, never tolerated |
+| The on-disk JSON contract | `[JsonPropertyName]` on each DTO property — there are no serialiser options |
+| Field type / maxLength / writable enforcement | `Core/Domain/IndexFields/IndexFieldRules.cs` — the only place |
 | Which fields may be chosen for upload or as an export marker | `IndexFieldRules.ValidateChosenTextField` |
-| Folder → document mapping (upload rules) | `Core/Upload/` _(planned)_ — see `docs/upload-requirements.md` |
+| Folder → document mapping (upload rules) | `Core/Domain/Uploads/` _(planned)_ — see `docs/upload-requirements.md` |
 | Zip layout, duplicate-title naming, marker format (export rules) | Export service _(planned)_ |
 | Date-range semantics (inclusive calendar dates, user's time zone) | Archive query API _(planned)_ |
 | System fields (`id`, `StoredAt`, `ModifiedAt`) | Archive only; never accepted from a client |
+| Whether the service is ready to serve | `Api/Health/CabinetCatalogHealthCheck.cs`, tagged `ready` |
+| How the service is containerised | `Nemetschek.Archive.Api/Dockerfile` and the root `docker-compose.yml` |
 
 ## Conventions
 
@@ -80,6 +95,34 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
   `maxLength` counts UTF-16 code units (`string.Length`), matching `nvarchar(n)`.
 - **Timestamps in UTC.** Time-zone conversion happens only where the user's calendar dates are
   interpreted.
+- **A `<summary>` says what a member does, in a line or two.** No rationale and no implementation detail
+  inside the doc block — IntelliSense shows the summary, so it has to be scannable. Where the *why*
+  guards against a future mistake, put it in a plain `//` comment; durable rationale goes in
+  `DECISIONS.md`.
+- **No null checks on non-nullable parameters.** `Nullable` is enabled and warnings are errors, so
+  passing null to a non-nullable parameter is a compile error and a runtime guard is unreachable.
+  Guard only where a value genuinely arrives unchecked at runtime — configuration, deserialised JSON,
+  reflection — and say so in a comment.
+- **Use the SDK's exception types; do not invent one.** A missing file is `FileNotFoundException` (it
+  carries `FileName` for you), malformed JSON is `JsonException`, a broken DataAnnotations rule is
+  `ValidationException`, a bad argument is `ArgumentException`. A custom exception earns its place only
+  when something actually catches it and needs to distinguish it — nothing here does.
+- **A DTO declares its own rules.** Put presence and range rules in DataAnnotations attributes on the
+  property, and cross-property or cross-sibling rules in `IValidatableObject.Validate` on the same
+  class. `Validator` does not recurse, so a DTO that owns children calls `Validator.ValidateObject` on
+  each of them first. The loader then only reads, deserialises, validates and maps — see
+  `CabinetsFileDto` and `CabinetsFileLoader`.
+- **A DTO is never a domain type.** DTOs live in `Infrastructure`, have nullable properties so a missing
+  value is reportable rather than fatal, and map across with a `To…()` method. Domain types live in
+  `Core`, are non-nullable, hold parsed values rather than raw strings, and are valid once constructed.
+  Do not collapse the two: it would put serialisation attributes in `Core` and move re-parsing into the
+  rules.
+- **Clean Code applies**: small functions that do one thing at a single level of abstraction, names that
+  state intent, and few parameters. `CabinetsFileLoader` is the shape to copy — two methods, no private
+  helpers, because the rules it would otherwise hand-code live on the DTO instead.
+- **`Core/Domain/` holds one folder per domain entity type**, and the folder names are **plural**. A
+  folder named `Cabinet/` containing a class `Cabinet` makes the namespace and the type collide, which
+  the compiler rejects. New entity? New plural folder under `Domain/`.
 - **Warnings are errors** (`Directory.Build.props`). Do not suppress; fix.
 - Shared build settings live in `Directory.Build.props`. Do not restate `TargetFramework`, `Nullable`
   or `ImplicitUsings` in a csproj.
@@ -100,12 +143,22 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
 
 ```bash
 dotnet build          # warnings are errors
-dotnet test           # offline, no containers — 32 tests at time of writing
+dotnet test           # offline, no containers — 70 tests across three test projects at time of writing
+dotnet run --project Nemetschek.Archive/Nemetschek.Archive.Api
+docker compose up --build   # NOT yet verified — written without Docker available
 ```
+
+With the service running: `/swagger`, `/openapi/v1.json`, `/health` (liveness, runs no checks) and
+`/health/ready` (readiness, checks the cabinet catalog). A dependent service waits on `/health/ready`,
+never on `/health`.
 
 To check a test really pins its rule, break the rule and confirm *that* test fails. Done so far for:
 the writable-field rule (removing the check fails exactly its two tests) and the Core-has-no-packages
 rule (adding a `PackageReference` to Core fails `Core_declares_no_package_references`).
+
+Startup is fail-fast and verified by hand: an absent `Archive:CabinetsFile`, or a path that does not
+exist, stops the service with a message naming the setting or the file. If you add a required setting,
+keep that property — a service that starts and then fails every request is harder to diagnose.
 
 Still to come, once the service is containerised: `docker compose up` with browsable OpenAPI per
 service, `docker compose down && up` preserving data, `docker compose logs` showing every service, and

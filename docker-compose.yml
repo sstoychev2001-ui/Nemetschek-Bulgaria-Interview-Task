@@ -1,18 +1,32 @@
-version: '3.4'
-
-x-logging:
-  &default-logging
+# Rotation is set here rather than left to the daemon default so a long-running service cannot fill the
+# disk with logs. The brief asks that an operation leave nothing behind that grows forever.
+x-logging: &default-logging
+  driver: json-file
   options:
     max-size: "10m"
     max-file: "5"
-  driver: json-file
 
 services:
-  api:
-    image: nemetshcek.archive
+  archive-api:
+    image: nemetschek-archive-api
     build:
-      context: ./src
-      dockerfile: Dockerfile
-    hostname: src
-    restart: always
+      context: .
+      dockerfile: Nemetschek.Archive/Nemetschek.Archive.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Points at the mount below. Override it to run the same image with a different cabinet set.
+      Archive__CabinetsFile: /app/fixtures/cabinets.json
+    volumes:
+      # Read-only: the Archive never writes its cabinet definitions, and the brief fixes them.
+      - ./fixtures:/app/fixtures:ro
+    ports:
+      - "${ARCHIVE_PORT:-8080}:8080"
+    restart: unless-stopped
     logging: *default-logging
+    healthcheck:
+      # Readiness, not liveness: this is what a dependent service should wait on.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s

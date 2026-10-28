@@ -1,4 +1,5 @@
-using Nemetschek.Archive.Core.Cabinets;
+using Nemetschek.Archive.Core.Domain.Cabinets;
+using Nemetschek.Archive.Core.Domain.IndexFields;
 
 namespace Nemetschek.Archive.Core.Ports;
 

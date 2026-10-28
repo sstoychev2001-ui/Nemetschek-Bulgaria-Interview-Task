@@ -1,6 +1,8 @@
-using Nemetschek.Archive.Core.Cabinets;
+using Nemetschek.Archive.TestSupport;
+using Nemetschek.Archive.Core.Domain.Cabinets;
+using Nemetschek.Archive.Core.Domain.IndexFields;
 
-namespace Nemetschek.Archive.Tests.Cabinets;
+namespace Nemetschek.Archive.Core.Tests.Domain.IndexFields;
 
 /// <summary>
 /// One test per field rule in the brief: "Each index field has a type ... maxLength ... writable:

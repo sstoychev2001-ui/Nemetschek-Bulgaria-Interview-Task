@@ -1,20 +1,23 @@
-namespace Nemetschek.Archive.Tests.Architecture;
+using Nemetschek.Archive.TestSupport;
+
+namespace Nemetschek.Archive.Api.Tests.Architecture;
 
 /// <summary>
 /// The dependency rules of the solution, enforced rather than described.
-///
-/// These matter because the layering is the thing that makes the rest of the brief achievable: Core
-/// having no dependencies is what lets `dotnet test` run every rule offline with no containers, and
-/// the Archive not referencing the Export is what keeps the service boundary honest. Splitting the
-/// repository into two solutions would NOT enforce either — a .sln is only a list of projects for
-/// tooling, and a ProjectReference works across solution membership. These tests do enforce it.
 /// </summary>
+// The layering is what makes the rest of the brief achievable: Core having no dependencies is what lets
+// `dotnet test` run every rule offline with no containers, and the Archive not referencing the Export is
+// what keeps the service boundary honest. Splitting the repository into two solutions would NOT enforce
+// either — a .sln is only a list of projects for tooling, and a ProjectReference works across solution
+// membership. These tests do enforce it.
+//
+// They live with the Api tests because the Api sits at the top of the dependency chain and so is the one
+// project that can see every other.
 public sealed class ProjectDependencyTests
 {
     private const string Core = "Nemetschek.Archive.Core";
     private const string Infrastructure = "Nemetschek.Archive.Infrastructure";
     private const string Api = "Nemetschek.Archive.Api";
-    private const string Tests = "Nemetschek.Archive.Tests";
 
     [Fact]
     public void Core_declares_no_package_references()
@@ -44,9 +47,9 @@ public sealed class ProjectDependencyTests
     [Fact]
     public void Dependencies_point_inward_only()
     {
-        // Nothing may reference the Api except the test project, and nothing may reference Infrastructure
-        // except the Api and the test project.
-        foreach (var (project, _) in RepositoryLayout.ProjectFiles.Where(p => p.Key != Tests))
+        // Nothing in production code may reference the Api, and nothing but the Api may reference
+        // Infrastructure. Test projects are exempt: each one references its own subject.
+        foreach (var project in RepositoryLayout.ProductionProjects)
         {
             var references = RepositoryLayout.ProjectReferencesOf(project);
 
@@ -60,12 +63,38 @@ public sealed class ProjectDependencyTests
     }
 
     [Fact]
+    public void Each_test_project_references_the_project_it_tests()
+    {
+        // A test project named X.Tests that does not reference X is testing nothing, which is easy to do
+        // by accident when projects are added or renamed.
+        foreach (var testProject in RepositoryLayout.ProjectFiles.Keys
+                     .Where(name => name.EndsWith(".Tests", StringComparison.Ordinal)))
+        {
+            var subject = testProject[..^".Tests".Length];
+
+            Assert.Contains(subject, RepositoryLayout.ProjectReferencesOf(testProject));
+        }
+    }
+
+    [Fact]
+    public void No_production_project_references_a_test_project()
+    {
+        foreach (var project in RepositoryLayout.ProductionProjects)
+        {
+            Assert.DoesNotContain(
+                RepositoryLayout.ProjectReferencesOf(project),
+                reference => reference.EndsWith(".Tests", StringComparison.Ordinal) ||
+                             reference.EndsWith(".TestSupport", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
     public void No_Archive_project_references_an_Export_project()
     {
         // The Export service reads the Archive over HTTP and keeps its own client DTOs. Sharing a
         // project between the two would turn an HTTP boundary into a compile-time one.
-        foreach (var (project, _) in RepositoryLayout.ProjectFiles
-                     .Where(p => p.Key.StartsWith("Nemetschek.Archive", StringComparison.Ordinal)))
+        foreach (var project in RepositoryLayout.ProjectFiles.Keys
+                     .Where(name => name.StartsWith("Nemetschek.Archive", StringComparison.Ordinal)))
         {
             Assert.DoesNotContain(
                 RepositoryLayout.ProjectReferencesOf(project),
@@ -80,7 +109,7 @@ public sealed class ProjectDependencyTests
         // and `dotnet test` at the root, which is exactly how the old scaffold's second solution rotted.
         var solution = File.ReadAllText(RepositoryLayout.Path("Nemetschek.sln"));
 
-        foreach (var (project, _) in RepositoryLayout.ProjectFiles)
+        foreach (var project in RepositoryLayout.ProjectFiles.Keys)
         {
             Assert.Contains(project, solution, StringComparison.Ordinal);
         }

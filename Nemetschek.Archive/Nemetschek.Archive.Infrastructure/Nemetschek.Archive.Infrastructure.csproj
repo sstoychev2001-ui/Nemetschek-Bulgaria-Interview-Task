@@ -8,4 +8,11 @@
     <ProjectReference Include="..\Nemetschek.Archive.Core\Nemetschek.Archive.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Pinned to the 9.0.x band on purpose: `dotnet add package` resolved 10.0.14, which would pull a
+         .NET 10 assembly into a net9.0 app alongside the ASP.NET Core 9 shared framework. Keep
+         Microsoft.Extensions.* in step with the target framework. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.4" />
+  </ItemGroup>
+
 </Project>

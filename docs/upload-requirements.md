@@ -2,7 +2,8 @@
 
 Source: `TASK.md` ("Upload rules", plus the constraints in "Things your system must cope with").
 Status: **analysis done; the field rules it depends on are implemented in
-`Nemetschek.Archive/Nemetschek.Archive.Core/Cabinets/`. The mapping itself is not built yet.**
+`Nemetschek.Archive/Nemetschek.Archive.Core/Domain/IndexFields/`. The mapping itself is not built yet —
+it will live in `Core/Domain/Uploads/`.**
 
 ## 1. What the user does
 
@@ -10,7 +11,7 @@ The user supplies three things:
 
 | Input | Constraint |
 |---|---|
-| A file cabinet | Must be one of the two in `Task/fixtures/cabinets.json`: `Invoices`, `Contracts` |
+| A file cabinet | Must be one of the two in `fixtures/cabinets.json`: `Invoices`, `Contracts` |
 | One index field | Must belong to that cabinet, be `type: "text"`, and be `writable: true` |
 | A folder of material | Any folder from their machine; contents are untrusted |
 
