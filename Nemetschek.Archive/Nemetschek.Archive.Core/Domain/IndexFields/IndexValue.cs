@@ -20,4 +20,10 @@ public abstract record IndexValue
     {
         public override FieldType Type => FieldType.Number;
     }
+
+    /// <summary>A calendar date.</summary>.
+    public sealed record Date(DateOnly Value) : IndexValue
+    {
+        public override FieldType Type => FieldType.Date;
+    }
 }

@@ -9,5 +9,6 @@ namespace Nemetschek.Archive.Core.Domain.IndexFields;
 public enum FieldType
 {
     Text,
-    Number
+    Number,
+    Date
 }

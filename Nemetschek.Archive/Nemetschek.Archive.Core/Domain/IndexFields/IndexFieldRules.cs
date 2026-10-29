@@ -12,7 +12,10 @@ public static class IndexFieldRules
     // editing this class; a type with none registered throws, so validation cannot be skipped by
     // omission.
     private static readonly IReadOnlyDictionary<FieldType, IIndexValueValidator> ValueValidators =
-        new IIndexValueValidator[] { new TextValueValidator(), new NumberValueValidator() }
+        new IIndexValueValidator[]
+            {
+                new TextValueValidator(), new NumberValueValidator(), new DateValueValidator(),
+            }
             .ToDictionary(validator => validator.Type);
 
     /// <summary>
@@ -92,6 +95,7 @@ public static class IndexFieldRules
     {
         FieldType.Text => "text",
         FieldType.Number => "number",
+        FieldType.Date => "date",
         _ => type.ToString().ToLowerInvariant(),
     };
 }

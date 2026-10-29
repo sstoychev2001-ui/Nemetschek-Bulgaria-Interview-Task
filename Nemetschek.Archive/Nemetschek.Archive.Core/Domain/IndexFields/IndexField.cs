@@ -33,6 +33,7 @@ public sealed record IndexField : IValidatableObject, IJsonOnDeserialized
     public int? MaxLength { get; init; }
 
     /// <summary>Whether a client may set this field.</summary>
+    [JsonPropertyName("writable")]
     public bool Writable { get; init; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
