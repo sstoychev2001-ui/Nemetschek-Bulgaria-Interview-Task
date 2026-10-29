@@ -1,0 +1,18 @@
+# Keep build output and local tooling state out of the build context, so an image never picks up
+# whatever happened to be on the developer's machine.
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+.git/
+.github/
+
+# Mounted at runtime rather than baked in — see the Dockerfile.
+fixtures/
+
+# Documents and the brief are not needed to build or run the service.
+*.md
+docs/
+
+# Local document storage from runs on the host; a container uses its own volume.
+.archive-data/

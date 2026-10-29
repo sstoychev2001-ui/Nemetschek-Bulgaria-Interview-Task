@@ -1,7 +1,13 @@
 # Applied automatically by `docker compose up`, so this file is the local development profile.
 # It exists to demonstrate the brief's requirement that the same image run with different settings:
 # nothing here is baked into the image.
+#
+# Only the environment name changes. Every path and limit still comes from docker-compose.yml, so
+# `docker compose -f docker-compose.yml up` gives the same service in Production mode.
 services:
   archive-api:
     environment:
+      # Development turns on detailed error pages. It does not change where anything is stored:
+      # the Archive__* variables in docker-compose.yml are environment variables, and those
+      # outrank anything in appsettings.Development.json.
       ASPNETCORE_ENVIRONMENT: Development
