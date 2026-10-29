@@ -1,7 +1,6 @@
 using Nemetschek.Archive.Core.Domain.Uploads;
-using DomainEntryResult = Nemetschek.Archive.Core.Domain.Uploads.UploadEntryResult;
 
-namespace Nemetschek.Archive.Api.Contracts.Uploads;
+namespace Nemetschek.Archive.Api.Contracts.Uploads.Responses;
 
 /// <summary>
 /// How one uploaded entry fared.
@@ -16,9 +15,4 @@ public sealed record UploadEntryResult(
     UploadEntryOutcome Outcome,
     Guid? DocumentId,
     IReadOnlyList<string> Parts,
-    string? Reason)
-{
-    /// <summary>Maps one of the Archive's results onto the wire shape.</summary>
-    public static UploadEntryResult From(DomainEntryResult result) => new(
-        result.Entry, result.Outcome, result.DocumentId, result.Parts, result.Reason);
-}
+    string? Reason);

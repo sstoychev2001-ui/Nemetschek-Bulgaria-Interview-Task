@@ -1,7 +1,6 @@
 using System.ComponentModel.DataAnnotations;
-using Nemetschek.Archive.Core.Domain.Uploads;
 
-namespace Nemetschek.Archive.Api.Contracts.Uploads;
+namespace Nemetschek.Archive.Api.Contracts.Uploads.Requests;
 
 /// <summary>
 /// The multipart body of an upload.
@@ -27,12 +26,4 @@ public sealed class UploadFormRequest
     /// a folder containing files is implied by them.
     /// </summary>
     public List<string> Folders { get; init; } = [];
-
-    /// <summary>Maps the body onto the upload the Archive's rules take.</summary>
-    public UploadRequest ToUploadRequest(string cabinetName) => new(
-        cabinetName,
-        Field,
-        FolderName,
-        [.. Files.Select(file => new UploadedFile(file.FileName, file.OpenReadStream))],
-        Folders);
 }

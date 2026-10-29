@@ -1,6 +1,4 @@
-using Nemetschek.Archive.Core.Domain.Uploads;
-
-namespace Nemetschek.Archive.Api.Contracts.Uploads;
+namespace Nemetschek.Archive.Api.Contracts.Uploads.Responses;
 
 /// <summary>
 /// What an upload did, as the client sees it.
@@ -13,12 +11,4 @@ public sealed record UploadReportResponse(
     string Cabinet,
     string Field,
     string FolderName,
-    IReadOnlyList<UploadEntryResult> Results)
-{
-    /// <summary>Maps the Archive's report onto the wire shape.</summary>
-    public static UploadReportResponse From(UploadReport report) => new(
-        report.CabinetName,
-        report.FieldName,
-        report.FolderName,
-        [.. report.Results.Select(UploadEntryResult.From)]);
-}
+    IReadOnlyList<UploadEntryResult> Results);

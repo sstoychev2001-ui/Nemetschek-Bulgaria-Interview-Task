@@ -1,6 +1,4 @@
-using Nemetschek.Archive.Core.Domain.Documents;
-
-namespace Nemetschek.Archive.Api.Contracts.Documents;
+namespace Nemetschek.Archive.Api.Contracts.Documents.Responses;
 
 /// <summary>
 /// One stored document, as the client sees it.
@@ -17,17 +15,4 @@ public sealed record DocumentResponse(
     IReadOnlyDictionary<string, IndexValueResponse> IndexValues,
     IReadOnlyList<PartResponse> Parts,
     DateTimeOffset StoredAt,
-    DateTimeOffset ModifiedAt)
-{
-    /// <summary>Maps a stored document onto the wire shape.</summary>
-    public static DocumentResponse From(Document document) => new(
-        document.Id,
-        document.Title,
-        document.IndexValues.ToDictionary(
-            entry => entry.Key,
-            entry => IndexValueResponse.From(entry.Value),
-            StringComparer.OrdinalIgnoreCase),
-        [.. document.Parts.Select(PartResponse.From)],
-        document.StoredAt,
-        document.ModifiedAt);
-}
+    DateTimeOffset ModifiedAt);

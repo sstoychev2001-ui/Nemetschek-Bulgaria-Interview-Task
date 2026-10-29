@@ -1,6 +1,4 @@
-using Nemetschek.Archive.Core.Domain.Documents;
-
-namespace Nemetschek.Archive.Api.Contracts.Documents;
+namespace Nemetschek.Archive.Api.Contracts.Documents.Responses;
 
 /// <summary>
 /// One page of a file cabinet's documents, as the client sees it.
@@ -15,9 +13,4 @@ public sealed record DocumentPageResponse(
     int Page,
     int Size,
     int Total,
-    IReadOnlyList<DocumentResponse> Documents)
-{
-    /// <summary>Maps a page of documents onto the wire shape.</summary>
-    public static DocumentPageResponse From(string cabinet, int page, int size, DocumentPage read) =>
-        new(cabinet, page, size, read.Total, [.. read.Documents.Select(DocumentResponse.From)]);
-}
+    IReadOnlyList<DocumentResponse> Documents);
