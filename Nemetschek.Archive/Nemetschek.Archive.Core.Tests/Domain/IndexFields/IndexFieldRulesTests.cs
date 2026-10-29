@@ -171,8 +171,11 @@ public sealed class IndexFieldRulesTests
     [Fact]
     public void Number_and_date_fields_have_no_length_limit()
     {
-        Assert.Null(TestCabinets.Invoices().FindField("Amount")!.MaxLength);
-        Assert.Null(TestCabinets.Invoices().FindField("InvoiceDate")!.MaxLength);
+        Assert.Null(Field("Amount").MaxLength);
+        Assert.Null(Field("InvoiceDate").MaxLength);
+
+        static IndexField Field(string name) =>
+            TestCabinets.Invoices().Fields.Single(field => field.Name == name);
     }
 
     // --- choosing the upload / marker field ---------------------------------------------------

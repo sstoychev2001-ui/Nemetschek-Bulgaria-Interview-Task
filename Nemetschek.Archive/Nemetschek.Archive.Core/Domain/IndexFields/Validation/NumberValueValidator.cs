@@ -9,8 +9,6 @@ internal sealed class NumberValueValidator : IIndexValueValidator
 
     public FieldViolation? Validate(IndexField field, IndexValue value) =>
         value is IndexValue.Number number
-            // Invariant culture on purpose: a number's length must not depend on the server's locale,
-            // or the same value would fit on one machine and not on another.
             ? MaxLength.Exceeded(field, number.Value.ToString(CultureInfo.InvariantCulture).Length)
             : null;
 }

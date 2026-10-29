@@ -36,13 +36,6 @@ public sealed class Cabinet : IValidatableObject, IJsonOnDeserialized
     public IEnumerable<IndexField> WritableTextFields =>
         Fields.Where(field => field.Writable && field.Type == FieldType.Text);
 
-    /// <summary>
-    /// Finds an index field by technical name, case-insensitively. Returns <c>null</c> if this
-    /// cabinet has no such field.
-    /// </summary>
-    public IndexField? FindField(string fieldName) =>
-        Fields.FirstOrDefault(field => string.Equals(field.Name, fieldName, StringComparison.OrdinalIgnoreCase));
-
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         var results = new List<ValidationResult>();

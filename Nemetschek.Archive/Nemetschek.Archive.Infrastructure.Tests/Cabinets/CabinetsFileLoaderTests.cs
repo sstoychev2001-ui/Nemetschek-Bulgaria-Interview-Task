@@ -89,7 +89,8 @@ public sealed class CabinetsFileLoaderTests
     public void Each_field_loads_with_its_type_limit_and_writability(
         string cabinetName, string fieldName, FieldType type, int? maxLength, bool writable)
     {
-        var field = Find(RealCabinets(), cabinetName).FindField(fieldName);
+        var field = Find(RealCabinets(), cabinetName)
+            .Fields.SingleOrDefault(candidate => candidate.Name == fieldName);
 
         Assert.NotNull(field);
         Assert.Equal(type, field.Type);

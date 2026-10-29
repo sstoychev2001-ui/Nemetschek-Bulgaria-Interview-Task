@@ -8,9 +8,6 @@ namespace Nemetschek.Archive.Core.Domain.IndexFields;
 /// </summary>
 public static class IndexFieldRules
 {
-    // One validator per field type. Supporting a new type means adding a validator rather than
-    // editing this class; a type with none registered throws, so validation cannot be skipped by
-    // omission.
     private static readonly IReadOnlyDictionary<FieldType, IIndexValueValidator> ValueValidators =
         new IIndexValueValidator[]
             {
@@ -25,7 +22,7 @@ public static class IndexFieldRules
     /// <exception cref="NotSupportedException">The field's type has no validator registered.</exception>
     public static FieldViolation? ValidateWrite(Cabinet cabinet, string fieldName, IndexValue value)
     {
-        var field = cabinet.FindField(fieldName);
+        var field = FindField(cabinet, fieldName);
         if (field is null)
         {
             return new FieldViolation(
@@ -48,8 +45,6 @@ public static class IndexFieldRules
                 $"but a {Describe(value.Type)} value was supplied.");
         }
 
-        // Everything above holds for every field type. What remains depends on the type, so it is the
-        // type's own validator that decides.
         return ValidatorFor(field.Type).Validate(field, value);
     }
 
@@ -59,7 +54,7 @@ public static class IndexFieldRules
     /// </summary>
     public static FieldViolation? ValidateChosenTextField(Cabinet cabinet, string fieldName)
     {
-        var field = cabinet.FindField(fieldName);
+        var field = FindField(cabinet, fieldName);
         if (field is null)
         {
             return new FieldViolation(
@@ -84,6 +79,13 @@ public static class IndexFieldRules
 
         return null;
     }
+
+    /// <summary>
+    /// Finds an index field by technical name. Returns <c>null</c> if the cabinet has no such field.
+    /// </summary>
+    private static IndexField? FindField(Cabinet cabinet, string fieldName) =>
+        cabinet.Fields.FirstOrDefault(field =>
+            string.Equals(field.Name, fieldName, StringComparison.OrdinalIgnoreCase));
 
     private static IIndexValueValidator ValidatorFor(FieldType type) =>
         ValueValidators.TryGetValue(type, out var validator)
