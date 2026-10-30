@@ -1,4 +1,5 @@
 using Nemetschek.Archive.TestSupport;
+using Nemetschek.Archive.Core.Domain.Documents;
 
 namespace Nemetschek.Archive.Api.Tests.Architecture;
 
@@ -19,11 +20,19 @@ public sealed class ProjectDependencyTests
     private const string Infrastructure = "Nemetschek.Archive.Infrastructure";
     private const string Api = "Nemetschek.Archive.Api";
 
+    /// <summary>The only packages `Core` may reference, named one by one.</summary>
+    // An abstractions-only package that reaches no disk, clock or socket does not cost `Core` what
+    // the rule protects: `dotnet test` still runs every rule offline with no containers. Anything
+    // that does reach one of those belongs in Infrastructure, so this is a list and not a pattern —
+    // adding to it is a decision, recorded in DECISIONS.md, rather than a formality.
+    private static readonly string[] CorePackageAllowlist =
+        ["Microsoft.Extensions.Logging.Abstractions"];
+
     [Fact]
-    public void Core_declares_no_package_references()
+    public void Core_declares_only_allowed_package_references()
     {
         // If this fails, the code that needed the package almost certainly belongs in Infrastructure.
-        Assert.Empty(RepositoryLayout.PackageReferencesOf(Core));
+        Assert.Equal(CorePackageAllowlist, RepositoryLayout.PackageReferencesOf(Core));
     }
 
     [Fact]

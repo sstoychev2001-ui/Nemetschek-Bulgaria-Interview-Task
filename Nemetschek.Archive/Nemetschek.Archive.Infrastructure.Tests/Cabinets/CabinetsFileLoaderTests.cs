@@ -1,9 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
-using Nemetschek.Archive.Core.Domain.Cabinets;
-using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Infrastructure.Cabinets;
 using Nemetschek.Archive.TestSupport;
+using Nemetschek.Archive.Core.Domain.Cabinets;
+using Nemetschek.Archive.Core.Domain.Documents;
+using Nemetschek.Archive.Core.Domain.IndexFields;
+using Nemetschek.Archive.Core.Validation.IndexFields;
+
+using Nemetschek.Archive.Core.Services.Cabinets;
 
 namespace Nemetschek.Archive.Infrastructure.Tests.Cabinets;
 
@@ -111,7 +115,7 @@ public sealed class CabinetsFileLoaderTests
     [Fact]
     public void The_catalog_finds_cabinets_case_insensitively()
     {
-        var catalog = CabinetCatalog.FromFile(FixturePath);
+        var catalog = new CabinetCatalog(CabinetsFileLoader.Load(FixturePath));
 
         Assert.NotNull(catalog.Find("Invoices"));
         Assert.NotNull(catalog.Find("invoices"));

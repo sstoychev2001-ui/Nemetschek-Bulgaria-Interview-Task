@@ -1,7 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
-using Nemetschek.Archive.Core.Domain.Documents;
-using Nemetschek.Archive.Core.Ports;
-using Nemetschek.Archive.Infrastructure.Documents;
+using Microsoft.Extensions.Logging;
+using Nemetschek.Archive.Core.Services.Documents;
+using Nemetschek.Archive.Core.Services.Interfaces.Documents;
+using Nemetschek.Archive.Infrastructure.Health;
 
 namespace Nemetschek.Archive.Infrastructure;
 
@@ -23,27 +24,30 @@ public static class DocumentsServiceCollectionExtensions
     /// </param>
     /// <exception cref="IOException">The storage directory cannot be created or cleared.</exception>
     /// <exception cref="UnauthorizedAccessException">The storage directory is not writable.</exception>
-    // The directory is prepared here, during registration, so a storage path that cannot be used
-    // stops the service with a clear error instead of failing every upload later. Same reasoning
-    // as AddCabinetCatalog.
-    public static IServiceCollection AddFileSystemDocumentStore(
+    public static IServiceCollection AddDocumentsStore(
         this IServiceCollection services,
         string storagePath,
         string basePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storagePath);
 
-        var store = new FileSystemDocumentStore(
-            CabinetsServiceCollectionExtensions.ResolvePath(storagePath, basePath),
-            TimeProvider.System);
+        var root = CabinetsServiceCollectionExtensions.ResolvePath(storagePath, basePath);
 
-        store.Prepare();
+        // Here rather than inside the registration below, so a root the service cannot use stops
+        // startup instead of failing the first request that needs it.
+        DocumentsStoreService.Prepare(root);
 
         // Registered under both: the port is what the rules depend on, and the concrete type is
-        // what the readiness check needs in order to probe the volume.
-        services.AddSingleton(store);
-        services.AddSingleton<IDocumentStore>(store);
-        services.AddScoped<DocumentQueryService>();
+        // what the readiness check needs in order to probe the volume. One instance either way —
+        // the store keeps no state, but it does hold a logger, so it is built from the container.
+        services.AddSingleton(provider => new DocumentsStoreService(
+            root,
+            TimeProvider.System,
+            provider.GetRequiredService<ILogger<DocumentsStoreService>>()));
+        services.AddSingleton<IDocumentStore>(
+            provider => provider.GetRequiredService<DocumentsStoreService>());
+        services.AddScoped<DocumentsService>();
+        services.AddHealthChecks().AddCheck<DocumentStorageHealthCheck>("storage", tags: ["ready"]);
 
         return services;
     }

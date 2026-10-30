@@ -8,9 +8,9 @@ Status: **built and working end to end, but not yet covered by tests** (test wri
 `POST /cabinets/{cabinetName}/uploads`.
 
 Note for whoever writes the tests: the mapping rules below are reachable directly through
-`new UploadPlanningService().PlanDocuments(cabinet, field, request)`, which needs no ports and no fakes. It
-returns one `PlannedDocument` per entry, each with an `UploadEntryOutcome` of `Stored` or
-`Skipped` — the same enum the report carries.
+`new UploadPlanningService().PlanEntries(cabinet, field, request)`, which needs no ports and no
+fakes. It returns one `UploadEntry` per entry — the same type the report is made of, carrying an
+`UploadEntryOutcome` of `Stored` or `Skipped` at this point.
 
 ## 1. What the user does
 
@@ -148,21 +148,48 @@ The response body is **always the same report**: one row per entry the server sa
 reason. A request the rules turn away before anything is stored is a report with a single `Failed`
 row holding the rule's own sentence.
 
-Only the status differs: `200` when nothing failed, `404` when any row is `Failed`. That decision
-lives entirely in `Api/Middleware/UploadFailureStatusMiddleware.cs`; no endpoint picks a status.
-**`404` is a knowing compromise** — right for an unknown cabinet, wrong for a partial failure where
-documents *were* created. See "Cut, knowingly" in `DECISIONS.md`.
+Only the status differs, and it is decided entirely in
+`Api/Middleware/ArchiveExceptionMiddleware.cs` — no endpoint picks one. A refusal the rules throw
+before anything is stored is `400`, an unknown cabinet is `404`, and **anything that got as far as a
+report is `200`, including a report whose rows are all `Failed`.** The status answers "was the
+request usable", and the rows answer "what happened to each entry of mine".
+
+That makes a `Failed` row invisible to a caller who reads only the status, which is why the store
+logs its own failures at `Error` — see "What the service logs" in `DECISIONS.md`. An earlier version
+raised the status to `404` when any row was `Failed`; it was dropped with
+`UploadFailureStatusMiddleware`, and `404` was the wrong code for it anyway — the cabinet was found
+and documents *were* created.
 
 Two limits of the transport, both deliberate and both documented in `README.md`:
 
-- An **empty folder is invisible in a multipart body**, so the client has to name it in `folders`. A
-  browser's directory picker cannot enumerate empty folders at all, so that rule is only reachable
-  from a client that walks the filesystem itself.
+- An **empty folder is invisible in a multipart body**, so the client has to name it in `folders`.
+  Multipart has no notion of a directory: a part is a name plus bytes, and an empty folder has no
+  bytes to send. It cannot be folded into `files` as a part
+  with empty content either, because `empty-note.txt` in the sample material is a **zero-byte file**
+  and the two have to produce different results — a document with one part against a document with
+  none. Arriving as "a part with no bytes", they would be indistinguishable. Verified in one request
+  on 2026-10-29: `empty-folder` came back `Stored` with `parts: []` and `empty-note.txt` `Stored`
+  with `parts: ["empty-note.txt"]`.
+
+  A folder that *does* hold files is never named, because its files imply it — so `folders` is
+  optional, and an upload of loose files or of an ordinary folder sends only `files`. Naming such a
+  folder anyway is a no-op: verified on 2026-10-29 by sending `folders=delivery-2026-03` alongside
+  `delivery-2026-03/page1.txt`, which produced neither an extra row nor a duplicate document. A
+  browser's directory picker cannot enumerate empty folders at all, so from the web client the
+  parameter is always absent; it is reachable only from a client that walks the filesystem itself.
 - A **nested folder is only reported as skipped if the client names it** in `folders`. The planner
   reports the skipped *files* it was handed, but it cannot report a folder it was never told about.
   `webkitdirectory` yields files only, so from a browser `delivery-2026-03/archive/old-page.txt`
   comes back as one skipped row and `delivery-2026-03/archive` is not mentioned. A client that
   walks the filesystem sends both and gets both.
+
+  **This is the second use of `folders`, and the reason it is not called `emptyFolders`** —
+  `delivery-2026-03/archive` holds a file, so that name would be a lie about the value being sent.
+  The set the parameter carries is "folders the client saw that its files do not imply", whose two
+  members are an empty folder and a nested folder. Verified together on 2026-10-29: one request
+  naming both `delivery-2026-03` and `delivery-2026-03/archive` returned the first as a `Stored`
+  document with `parts: ["page1.txt"]` and the second as its own `Skipped` row, beside the skipped
+  row for `old-page.txt`.
 - The **whole body must arrive before anything is stored**, because files are bound as `IFormFile`.
   ASP.NET spools parts over 64 KiB to temp files it cleans up itself, so this does not buffer the
   upload in memory, but it is where the system breaks first on a very large upload.

@@ -1,3 +1,5 @@
+using Nemetschek.Archive.Core.Domain.Documents;
+
 namespace Nemetschek.Archive.Api.Contracts.Documents.Responses;
 
 /// <summary>

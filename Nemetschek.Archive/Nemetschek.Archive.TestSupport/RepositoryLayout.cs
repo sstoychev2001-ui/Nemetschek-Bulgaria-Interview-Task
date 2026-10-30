@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using Nemetschek.Archive.Core.Domain.Documents;
 
 namespace Nemetschek.Archive.TestSupport;
 

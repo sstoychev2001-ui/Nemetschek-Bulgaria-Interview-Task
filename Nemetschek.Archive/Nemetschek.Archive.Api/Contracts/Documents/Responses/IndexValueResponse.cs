@@ -1,3 +1,4 @@
+using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
 
 namespace Nemetschek.Archive.Api.Contracts.Documents.Responses;

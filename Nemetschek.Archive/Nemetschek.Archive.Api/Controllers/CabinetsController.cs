@@ -1,9 +1,13 @@
 using Microsoft.AspNetCore.Mvc;
-using Nemetschek.Archive.Api.Contracts.Documents;
-using Nemetschek.Archive.Api.Contracts.Uploads;
-using Nemetschek.Archive.Api.Results;
-using Nemetschek.Archive.Core.Domain.Documents;
-using Nemetschek.Archive.Core.Domain.Uploads;
+using Nemetschek.Archive.Api.Contracts.Documents.Mappings;
+using Nemetschek.Archive.Api.Contracts.Documents.Requests;
+using Nemetschek.Archive.Api.Contracts.Documents.Responses;
+using Nemetschek.Archive.Api.Contracts.Shared;
+using Nemetschek.Archive.Api.Contracts.Uploads.Mappings;
+using Nemetschek.Archive.Api.Contracts.Uploads.Requests;
+using Nemetschek.Archive.Api.Contracts.Uploads.Responses;
+using Nemetschek.Archive.Core.Services.Documents;
+using Nemetschek.Archive.Core.Services.Uploads;
 
 namespace Nemetschek.Archive.Api.Controllers;
 
@@ -15,7 +19,7 @@ namespace Nemetschek.Archive.Api.Controllers;
 [Produces("application/json")]
 public sealed class CabinetsController(
     UploadService uploadService,
-    DocumentQueryService documentQueryService,
+    DocumentsService documentsService,
     PagingLimits paging) : ControllerBase
 {
     /// <summary>Uploads a folder of material into a file cabinet.</summary>
@@ -25,8 +29,9 @@ public sealed class CabinetsController(
     [HttpPost("{cabinetName}/uploads")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType<UploadReportResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<UploadReportResponse>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Upload(
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<UploadReportResponse> Upload(
         string cabinetName,
         [FromForm] UploadFormRequest form,
         CancellationToken cancellationToken)
@@ -34,7 +39,7 @@ public sealed class CabinetsController(
         var report = await uploadService.UploadAsync(
             form.ToUploadRequest(cabinetName), cancellationToken);
 
-        return this.UploadReport(report);
+        return report.ToResponse();
     }
 
     /// <summary>Reads a page of the documents stored in a file cabinet, oldest first.</summary>
@@ -44,17 +49,17 @@ public sealed class CabinetsController(
     [HttpGet("{cabinetName}/documents")]
     [ProducesResponseType<DocumentPageResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Documents(
+    public async Task<DocumentPageResponse> Documents(
         string cabinetName,
         [FromQuery] DocumentPageRequest query,
         CancellationToken cancellationToken)
     {
-        var page = await documentQueryService.ListAsync(
+        var page = await documentsService.ListAsync(
             cabinetName,
             query.Skip(paging.MaxPageSize),
             query.Take(paging.MaxPageSize),
             cancellationToken);
 
-        return this.DocumentPageResult(cabinetName, query, paging.MaxPageSize, page);
+        return page.ToResponse(cabinetName, query.Page, query.Take(paging.MaxPageSize));
     }
 }

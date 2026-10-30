@@ -1,3 +1,5 @@
+using Nemetschek.Archive.Core.Domain.Cabinets;
+
 namespace Nemetschek.Archive.Api.Contracts.Uploads.Responses;
 
 /// <summary>

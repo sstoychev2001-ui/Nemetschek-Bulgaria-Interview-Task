@@ -1,5 +1,7 @@
 using Nemetschek.Archive.Core.Domain.Cabinets;
+using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
+using Nemetschek.Archive.Core.Validation.IndexFields;
 
 namespace Nemetschek.Archive.TestSupport;
 

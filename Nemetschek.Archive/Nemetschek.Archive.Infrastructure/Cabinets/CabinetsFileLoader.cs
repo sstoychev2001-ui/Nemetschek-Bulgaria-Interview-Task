@@ -2,6 +2,8 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Nemetschek.Archive.Core.Domain.Cabinets;
+using Nemetschek.Archive.Core.Domain.Documents;
+using Nemetschek.Archive.Core.Domain.IndexFields;
 
 namespace Nemetschek.Archive.Infrastructure.Cabinets;
 

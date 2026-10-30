@@ -1,15 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The archive rules live here: cabinets and their field constraints, the folder-to-document
-       upload mapping, and the document/query model. Shared build settings come from
-       Directory.Build.props at the repository root.
-
-       This project must keep ZERO external dependencies and must not reference Infrastructure or
-       Api. Storage and transport are reached only through the interfaces in Ports/, which
-       Infrastructure implements. That is what lets `dotnet test` exercise every rule with no
-       network, no database and no containers, as the brief requires.
-
-       If you are about to add a PackageReference here, the code probably belongs in
-       Infrastructure instead. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.4" />
+  </ItemGroup>
 
 </Project>

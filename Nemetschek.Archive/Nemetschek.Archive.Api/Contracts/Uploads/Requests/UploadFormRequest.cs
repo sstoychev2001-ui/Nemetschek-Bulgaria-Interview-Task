@@ -22,8 +22,9 @@ public sealed class UploadFormRequest
     public List<IFormFile> Files { get; init; } = [];
 
     /// <summary>
-    /// Relative paths of folders the client saw. Only folders holding no file need to be listed;
-    /// a folder containing files is implied by them.
+    /// Relative paths of folders the client saw, for the two kinds its files do not imply: a folder
+    /// with no file in it, and a nested folder that should be reported as skipped under its own
+    /// name. A folder holding files is implied by them, and listing it changes nothing.
     /// </summary>
     public List<string> Folders { get; init; } = [];
 }

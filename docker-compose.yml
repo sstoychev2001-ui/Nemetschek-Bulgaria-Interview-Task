@@ -24,12 +24,8 @@ services:
       Archive__MaxPageSize: ${ARCHIVE_MAX_PAGE_SIZE:-50}
       Archive__MaxUploadBytes: ${ARCHIVE_MAX_UPLOAD_BYTES:-268435456}
       Archive__MaxUploadEntries: ${ARCHIVE_MAX_UPLOAD_ENTRIES:-10000}
-    volumes:
-      # Read-only: the Archive never writes its cabinet definitions, and the brief fixes them.
+    volumes:    
       - ./fixtures:/app/fixtures:ro
-      # A named volume, not a path in the container: `docker compose down` destroys containers but
-      # keeps named volumes, so documents are still here after the next `up`. Only `down -v` would
-      # remove them.
       - archive-data:/var/lib/archive
     ports:
       - "${ARCHIVE_PORT:-8080}:8080"
