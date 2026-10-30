@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Exceptions.Cabinets;
+using Nemetschek.Archive.Core.Exceptions.Documents;
 using Nemetschek.Archive.Core.Exceptions.Uploads;
 
 namespace Nemetschek.Archive.Api.Middleware;
@@ -48,7 +48,12 @@ public sealed class ArchiveExceptionMiddleware(
     private static Refusal Map(Exception exception) => exception switch
     {
         UnknownCabinetException => new Refusal(StatusCodes.Status404NotFound, "Unknown file cabinet"),
+        DocumentNotFoundException => new Refusal(StatusCodes.Status404NotFound, "Unknown document"),
         UploadRefusedException => new Refusal(StatusCodes.Status400BadRequest, "The upload was refused"),
+        IndexValueRefusedException => new Refusal(
+            StatusCodes.Status400BadRequest, "The index value was refused"),
+        InvalidDateRangeException => new Refusal(
+            StatusCodes.Status400BadRequest, "The date range is not usable"),
         _ => throw exception
     };
 

@@ -15,6 +15,17 @@ public sealed class DocumentPageRequest
     [Range(1, int.MaxValue)]
     public int Size { get; init; } = 20;
 
+    /// <summary>
+    /// The first calendar date to include, as the caller's own date. Unbounded when absent.
+    /// </summary>
+    public DateOnly? From { get; init; }
+
+    /// <summary>
+    /// The last calendar date to include, as the caller's own date, and included in full.
+    /// Unbounded when absent.
+    /// </summary>
+    public DateOnly? To { get; init; }
+
     /// <summary>How many documents this page holds, within the server's maximum.</summary>
     public int Take(int maxPageSize) => Math.Clamp(Size, 1, maxPageSize);
 

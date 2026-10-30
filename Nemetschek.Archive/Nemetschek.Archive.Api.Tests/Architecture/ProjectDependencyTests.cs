@@ -15,7 +15,7 @@ public sealed class ProjectDependencyTests
     private const string ExportInfrastructure = "Nemetschek.Export.Infrastructure";
     private const string ExportApi = "Nemetschek.Export.Api";
 
-    /// <summary>The only packages `Core` may reference, named one by one.</summary>
+    /// <summary>The only packages either service's `Core` may reference, named one by one.</summary>
     private static readonly string[] CorePackageAllowlist =
         ["Microsoft.Extensions.Logging.Abstractions"];
 
@@ -98,7 +98,7 @@ public sealed class ProjectDependencyTests
     [Fact]
     public void Export_Core_declares_only_allowed_package_references()
     {
-        Assert.Empty(RepositoryLayout.PackageReferencesOf(ExportCore));
+        Assert.Equal(CorePackageAllowlist, RepositoryLayout.PackageReferencesOf(ExportCore));
     }
 
     [Fact]

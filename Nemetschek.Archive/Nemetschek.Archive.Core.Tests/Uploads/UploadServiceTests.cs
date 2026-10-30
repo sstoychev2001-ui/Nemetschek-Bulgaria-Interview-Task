@@ -1,5 +1,6 @@
 using System.Text;
 using Nemetschek.Archive.Core.Domain.Documents;
+using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Core.Domain.Uploads;
 using Nemetschek.Archive.Core.Exceptions.Cabinets;
 using Nemetschek.Archive.Core.Exceptions.Uploads;
@@ -200,7 +201,7 @@ public sealed class UploadServiceTests
         {
             Assert.Equal(
                 "sample-material",
-                Assert.IsType<Core.Domain.IndexFields.IndexValue.Text>(
+                Assert.IsType<IndexValue.Text>(
                     document.IndexValues["Batch"]).Value);
         }
     }
@@ -262,9 +263,30 @@ public sealed class UploadServiceTests
 
         public Task<DocumentPage> ListAsync(
             string cabinetName,
+            StoredRange storedAt,
             int skip,
             int take,
             CancellationToken cancellationToken) =>
             Task.FromResult(new DocumentPage([], 0));
+
+        public Task<Document?> FindAsync(
+            string cabinetName,
+            Guid documentId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException("An upload does not read documents back.");
+
+        public Task<Stream?> OpenPartAsync(
+            string cabinetName,
+            Guid documentId,
+            Guid partId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException("An upload does not read part content.");
+
+        public Task<Document?> SetIndexValuesAsync(
+            string cabinetName,
+            Guid documentId,
+            IReadOnlyDictionary<string, IndexValue> values,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException("An upload sets index values as it stores.");
     }
 }

@@ -66,7 +66,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [Fact]
     public async Task Reading_a_page_logs_nothing()
     {
-        await Store().ListAsync("Invoices", skip: 0, take: 10, CancellationToken.None);
+        await Store().ListAsync("Invoices", StoredRange.All, skip: 0, take: 10, CancellationToken.None);
 
         Assert.Empty(logger.Entries);
     }
@@ -77,7 +77,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         var store = Store();
         await store.AddAsync(Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
 
-        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+        var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
 
         var document = Assert.Single(page.Documents);
         Assert.Equal("invoice-001.txt", document.Title);
@@ -151,7 +151,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
             StringComparison.Ordinal);
         Assert.DoesNotContain("Договор", partFile, StringComparison.Ordinal);
 
-        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+        var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
         Assert.Equal("Договор София.txt", Assert.Single(page.Documents).Parts[0].Name);
     }
 
@@ -162,7 +162,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         await store.AddAsync(
             Document.ToStore("Invoices", "empty-folder", Values(), []), CancellationToken.None);
 
-        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+        var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
 
         Assert.Empty(Assert.Single(page.Documents).Parts);
     }
@@ -190,7 +190,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
             ]),
             CancellationToken.None);
 
-        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+        var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
 
         Assert.Equal(
             ["page1.txt", "page10.txt", "page2.txt"],
@@ -205,7 +205,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         await store.AddAsync(Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
         await store.AddAsync(Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
 
-        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+        var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
 
         Assert.Equal(2, page.Total);
         Assert.Equal(2, page.Documents.Select(document => document.Id).Distinct().Count());
@@ -222,7 +222,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
                 Document.ToStore("Invoices", title, Values(), []), CancellationToken.None);
         }
 
-        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+        var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
 
         Assert.Equal(
             ["january", "february", "march"],
@@ -247,7 +247,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
                 Document.ToStore("Invoices", title, Values(), []), CancellationToken.None);
         }
 
-        var page = await store.ListAsync("Invoices", skip, take, CancellationToken.None);
+        var page = await store.ListAsync("Invoices", StoredRange.All, skip, take, CancellationToken.None);
 
         Assert.Equal(expected, page.Documents.Select(document => document.Title));
         Assert.Equal(5, page.Total);
@@ -256,7 +256,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [Fact]
     public async Task A_cabinet_with_nothing_in_it_is_an_empty_page()
     {
-        var page = await Store().ListAsync("Contracts", 0, 10, CancellationToken.None);
+        var page = await Store().ListAsync("Contracts", StoredRange.All, 0, 10, CancellationToken.None);
 
         Assert.Empty(page.Documents);
         Assert.Equal(0, page.Total);
@@ -273,10 +273,10 @@ public sealed class DocumentsStoreServiceTests : IDisposable
 
         Assert.Equal(
             "invoice",
-            Assert.Single((await store.ListAsync("Invoices", 0, 10, CancellationToken.None)).Documents).Title);
+            Assert.Single((await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None)).Documents).Title);
         Assert.Equal(
             "contract",
-            Assert.Single((await store.ListAsync("Contracts", 0, 10, CancellationToken.None)).Documents).Title);
+            Assert.Single((await store.ListAsync("Contracts", StoredRange.All, 0, 10, CancellationToken.None)).Documents).Title);
     }
 
     [Theory]
@@ -291,7 +291,7 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         var store = Store();
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => store.ListAsync(cabinetName, 0, 10, CancellationToken.None));
+            () => store.ListAsync(cabinetName, StoredRange.All, 0, 10, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(
             () => store.AddAsync(
                 Document.ToStore(cabinetName, "title", Values(), []), CancellationToken.None));

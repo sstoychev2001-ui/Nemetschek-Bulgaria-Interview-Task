@@ -1,4 +1,5 @@
 using Nemetschek.Archive.Core.Domain.Documents;
+using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Core.Exceptions.Cabinets;
 using Nemetschek.Archive.Core.Services.Cabinets;
 using Nemetschek.Archive.Core.Services.Documents;
@@ -18,7 +19,7 @@ public sealed class DocumentsServiceTests
         var store = new RecordingStore();
 
         var refusal = await Assert.ThrowsAsync<UnknownCabinetException>(
-            () => Service(store).ListAsync("Nonsense", 0, 10, CancellationToken.None));
+            () => Service(store).ListAsync("Nonsense", StoredRange.All, 0, 10, CancellationToken.None));
 
         Assert.Equal("Nonsense", refusal.CabinetName);
         Assert.Null(store.AskedFor);
@@ -32,7 +33,7 @@ public sealed class DocumentsServiceTests
     {
         var store = new RecordingStore();
 
-        await Service(store).ListAsync(asked, 0, 10, CancellationToken.None);
+        await Service(store).ListAsync(asked, StoredRange.All, 0, 10, CancellationToken.None);
 
         Assert.Equal("Invoices", store.AskedFor);
     }
@@ -42,7 +43,7 @@ public sealed class DocumentsServiceTests
     {
         var store = new RecordingStore();
 
-        await Service(store).ListAsync("Invoices", skip: 40, take: 5, CancellationToken.None);
+        await Service(store).ListAsync("Invoices", StoredRange.All, skip: 40, take: 5, CancellationToken.None);
 
         Assert.Equal((40, 5), (store.Skip, store.Take));
     }
@@ -53,7 +54,7 @@ public sealed class DocumentsServiceTests
         var page = new DocumentPage([Document.ToStore("Invoices", "a", new Dictionary<string, Core.Domain.IndexFields.IndexValue>(), [])], 7);
         var store = new RecordingStore { Page = page };
 
-        Assert.Same(page, await Service(store).ListAsync("Invoices", 0, 10, CancellationToken.None));
+        Assert.Same(page, await Service(store).ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None));
     }
 
     private static DocumentsService Service(IDocumentStore store) =>
@@ -70,20 +71,63 @@ public sealed class DocumentsServiceTests
 
         public DocumentPage Page { get; init; } = new([], 0);
 
+        public StoredRange? AskedOver { get; private set; }
+
+        public Document? Found { get; init; }
+
+        public Stream? Content { get; init; }
+
+        public IReadOnlyDictionary<string, IndexValue>? Written { get; private set; }
+
         public Task<Document> AddAsync(Document document, CancellationToken cancellationToken) =>
             throw new NotSupportedException("A read must not store anything.");
 
         public Task<DocumentPage> ListAsync(
             string cabinetName,
+            StoredRange storedAt,
             int skip,
             int take,
             CancellationToken cancellationToken)
         {
             AskedFor = cabinetName;
+            AskedOver = storedAt;
             Skip = skip;
             Take = take;
 
             return Task.FromResult(Page);
+        }
+
+        public Task<Document?> FindAsync(
+            string cabinetName,
+            Guid documentId,
+            CancellationToken cancellationToken)
+        {
+            AskedFor = cabinetName;
+
+            return Task.FromResult(Found);
+        }
+
+        public Task<Stream?> OpenPartAsync(
+            string cabinetName,
+            Guid documentId,
+            Guid partId,
+            CancellationToken cancellationToken)
+        {
+            AskedFor = cabinetName;
+
+            return Task.FromResult(Content);
+        }
+
+        public Task<Document?> SetIndexValuesAsync(
+            string cabinetName,
+            Guid documentId,
+            IReadOnlyDictionary<string, IndexValue> values,
+            CancellationToken cancellationToken)
+        {
+            AskedFor = cabinetName;
+            Written = values;
+
+            return Task.FromResult(Found);
         }
     }
 }
