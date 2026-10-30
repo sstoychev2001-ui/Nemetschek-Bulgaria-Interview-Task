@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nemetschek.Export.Core\Nemetschek.Export.Core.csproj" />
+  </ItemGroup>
+
+</Project>
