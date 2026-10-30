@@ -101,7 +101,8 @@ public sealed class DocumentsStoreService(
         catch (Exception exception)
         {
             Discard(staging);
-            logger.LogError(exception, "Storing a document in {CabinetName} failed", document.CabinetName);
+            logger.LogError(
+                exception, "Storing a document in {CabinetName} failed", document.CabinetName);
             throw;
         }
     }
