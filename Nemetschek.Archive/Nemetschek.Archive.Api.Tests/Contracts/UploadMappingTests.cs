@@ -11,8 +11,6 @@ namespace Nemetschek.Archive.Api.Tests.Contracts;
 /// </summary>
 public sealed class UploadMappingTests
 {
-    // --- the body on the way in ----------------------------------------------------------------
-
     [Fact]
     public void The_route_cabinet_and_the_form_field_reach_the_rules()
     {
@@ -26,7 +24,6 @@ public sealed class UploadMappingTests
     [Fact]
     public void A_parts_filename_becomes_the_relative_path_the_rules_read()
     {
-        // This is the whole transport decision: the structure of the folder travels in `filename`.
         var form = Form("Batch", "sample-material", files:
             ["invoice-001.txt", "delivery-2026-03/page1.txt"]);
 
@@ -38,8 +35,6 @@ public sealed class UploadMappingTests
     [Fact]
     public void A_filename_is_carried_across_untouched_because_the_rules_judge_it()
     {
-        // Nothing here sanitises or rejects: RelativePath is the one place that decides, and it
-        // reports rather than silently rewriting. A mapping that "helped" would hide an attack.
         var form = Form("Batch", "sample-material", files: ["../../etc/passwd"]);
 
         Assert.Equal(
@@ -76,8 +71,6 @@ public sealed class UploadMappingTests
         Assert.Empty(request.Files);
         Assert.Empty(request.FolderPaths);
     }
-
-    // --- the report on the way out -------------------------------------------------------------
 
     [Fact]
     public void The_report_maps_its_cabinet_field_and_folder_name()
@@ -124,8 +117,6 @@ public sealed class UploadMappingTests
     [Fact]
     public void The_draft_never_reaches_the_wire()
     {
-        // The draft holds open-content callbacks and the whole domain document; the response shape
-        // deliberately has no field for it.
         Assert.DoesNotContain(
             "Draft",
             typeof(Api.Contracts.Uploads.Responses.UploadEntryResult)

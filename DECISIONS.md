@@ -91,6 +91,60 @@ Each decision in the form "A, because B". Updated as the work progresses.
 - **Violation reasons are complete user-facing sentences naming the field and the limit, because** the
   client is forbidden from restating server rules, so the server must phrase them.
 
+## The Export service's projects
+
+Created on 2026-10-30, projects only — no export rule is implemented.
+
+- **All six projects were created at once, not just the three production ones, because** the
+  convention is one test project per production project and the export rules need a home to land in
+  *with* their tests. The brief makes "every export rule has a test that fails when that rule is
+  broken" an acceptance criterion, and the Archive's own history is the argument: the upload rules
+  shipped untested and stayed that way for days. `Both_services_have_the_same_shape` now fails if
+  one service gains a project the other lacks.
+- **The two empty test projects hold a skipped placeholder rather than nothing, because** an empty
+  test assembly makes `dotnet test` print "No test is available in …", which reads as a
+  misconfiguration rather than as work owed. Each `Skip` reason names what is missing and points
+  here. The run now reports `Skipped: 1` twice, which is the truth.
+
+  **The seven rules those tests owe**, from the brief's "Export rules", so the next session starts
+  from a checklist rather than from the brief:
+
+  1. a from-date and a to-date are inclusive calendar dates, as the user means them, filtered on
+     `StoredAt`;
+  2. a document with one part becomes a file named after the document;
+  3. a document with several parts becomes a folder with one file per part;
+  4. a document with no parts becomes an empty folder;
+  5. two documents with the same title both survive, by a naming rule that has to be documented;
+  6. after a document is exported, the chosen field is set to `Exported on yyyy-MM-dd`;
+  7. the marker records, it does not filter — every export covers the whole range and overwrites.
+
+  Each needs a test that fails when the rule is broken, which is an acceptance criterion. The same
+  goes for `Nemetschek.Export.Infrastructure.Tests`: that the client pages through the Archive
+  rather than asking for everything at once, that part content is streamed rather than buffered
+  (exports may be larger than available memory), and that a half-finished export leaves nothing
+  behind.
+- **The Export's layering tests live in `Nemetschek.Archive.Api.Tests`, because** they read csproj
+  files rather than referencing projects, so one place enforces both services without either
+  depending on the other — and putting them in `Nemetschek.Export.Api.Tests` would have meant a
+  second copy of `RepositoryLayout`, which the `TestSupport` removal had just finished eliminating.
+  The reverse rule now exists too: `No_Export_project_references_an_Archive_project`.
+- **`Export.Core`'s package allowlist is empty, because** nothing has earned a place in it yet. The
+  Archive's Core took `Logging.Abstractions` for the store's own logging; if the export rules need
+  the same, that is a decision to record here rather than a test to delete.
+- **`Nemetschek.Export.Api` declares `InternalsVisibleTo` for its test project, because** top-level
+  statements compile to an internal `Program`, and `WebApplicationFactory<Program>` has to see it to
+  boot the service in process. The Archive needs no equivalent: it names its public
+  `CabinetsController` as the entry-point type instead, and the Export has no public type yet.
+- **The scaffold already serves OpenAPI and liveness, because** both are acceptance criteria for
+  *every* service, and four tests that boot the real host are what prove a new project is wired up
+  rather than merely compiling. Readiness was deliberately left out: it has to mean "the Archive is
+  reachable", and a `/health/ready` that answers healthy without checking anything would be worse
+  than none — a dependent service would wait on a lie. `No_readiness_endpoint_is_published_yet`
+  pins that until the client exists.
+- Not done, and knowingly: no `Dockerfile`, no compose service, and no settings for the Archive's
+  base address. One `docker compose up` must eventually start both; today it starts the Archive
+  only.
+
 ## Tests
 
 - **`TestSupport` was removed and its two helpers moved into the projects that use them, because**
@@ -902,8 +956,11 @@ functionality:
 | **`GET /cabinets`** | The client picks a cabinet and sees each field's type and whether it is writable | No endpoint, so a client cannot learn the fields without restating them — which the brief forbids. The catalog is already in memory; this is a read of `ICabinetCatalog` and a response DTO |
 | **CORS** | "The client may be served from a different host than the services" | No policy configured |
 
-Then, out of scope for this review but named for completeness: the whole Export service, the web
-client, and the round-trip demo that needs both.
+Then, out of scope for this review but named for completeness: the export rules, the web client, and
+the round-trip demo that needs both. The Export service's **projects** exist as of 2026-10-30 — six
+of them, same shape as the Archive, with OpenAPI and liveness wired and four tests that boot the
+host — but no export rule, no Archive client, no endpoint, no Dockerfile and no compose service.
+The seven export rules that are owed are listed under "The Export service's projects" above.
 
 Against "Things your system must cope with":
 
@@ -1055,3 +1112,6 @@ Rough, as the brief asks for. Durations are approximate and grouped per working 
 | 2026-10-30 | ~0.3 h | Audited the brief against the code to answer "are we done apart from Export and the UI". Answer: no — the Archive is missing a part-content endpoint, index-value updates, the date-range filter and `GET /cabinets`, has no CORS policy, and still has zero tests over the folder→document upload rules (the brief's priority 1). The first two block the Export service, so they precede it. Counted the suite by class to get the coverage claim right (9 architecture + 31 loader + 25 field rules + 5 store), and rewrote "What is built, what is missing" as a table with how each gap would be done. No code change |
 | 2026-10-30 | ~0.2 h | Fixed a broken build: `DocumentPage` and `FieldViolation` were absent from the working tree, so eleven files in `Core` would not compile. Traced it to the merge at `HEAD` (`6f0ae8f`), which took the deleting side of `660a26b` — a 28-file, 843-deletion commit from `origin/main`. Restored both from `d1fc81b`, then checked every other path that commit deleted: all of them are old locations the Core restructure superseded (`Ports/` → `Services/Interfaces/`, `Domain/IndexFields/` → `Validation/IndexFields/`, the deliberately merged `*Draft` types), each with a live counterpart. The cancellation guard in `AddAsync` had also gone missing for the second time and was restored again, which is what the suite caught |
 | 2026-10-30 | ~1.4 h | Removed the `TestSupport` project and raised coverage from 70 tests to 281 (98.9% of lines; Api 99.4%, Core 98.6%, Infrastructure 100%). `TestCabinets` moved to `Core.Tests` and `RepositoryLayout` to `Api.Tests`; the fixture-drift guard that the split would have destroyed was rebuilt on both sides. New: 32 tests for the folder→document upload rules (the brief's priority 1, previously uncovered), 23 for `UploadService` including the partial-failure rule, 25 more for the store (round trip, paging, system fields, untrusted cabinet names, `Prepare`, `CanWrite`), the catalog, the domain validation rules, every mapping, the paging arithmetic, the status middleware, and 27 endpoint tests that boot the real service with `WebApplicationFactory`. No production code was touched, per the instruction: where a test and the code disagreed — the store logging a cancelled upload at `Error` — the test now states the behaviour and `DECISIONS.md` is corrected instead. Found `UploadEntry.Failed` to be dead code and left it, flagged |
+| 2026-10-30 | ~0.5 h | Created the `Nemetschek.Export` folder and its six projects — Core, Infrastructure, Api and one test project each — mirroring the Archive's shape, with the shared build settings left to `Directory.Build.props` and package versions kept in step. No export rule is implemented. Wired the project references, added all six to `Nemetschek.sln`, and extended the solution-wide architecture tests with seven Export rules (including the reverse isolation rule and `Both_services_have_the_same_shape`), so the new layering is enforced from the first commit rather than described. The Api scaffold serves OpenAPI and liveness and has four tests that boot the real host through `WebApplicationFactory`; readiness was left out on purpose, since it has to mean "the Archive is reachable" and a readiness endpoint that checks nothing would make a dependent service wait on a lie. The two empty test projects carry one skipped, reasoned placeholder each so `dotnet test` reads as work owed instead of printing "No test is available". 292 passing, 2 skipped |
+| 2026-10-30 | ~0.1 h | Deleted the stray `NUL` file from the repository root: 99 bytes holding an SSH `known_hosts` line for `[localhost]:56630`, written when a command redirected to `NUL` under Git Bash, which creates a real file instead of the null device. Public host key only, no private material, and untracked. Checked afterwards that the root holds nothing else unexpected and that the new Export projects' `bin/`/`obj/` are covered by `.gitignore`, so the twelve source files are all that is left to commit |
+| 2026-10-30 | ~0.2 h | Stripped every non-`<summary>` comment from the test projects at request, continuing a sweep already started by hand: 168 lines across 19 files, leaving the XML doc blocks and tidying the blank lines the removals left behind. The repository-wide convention "no comments except `<summary>` blocks" already said this and the new tests had ignored it, so the convention bullet in `AGENTS.md` now states that it covers test code too. One thing had to be rehoused rather than deleted: the checklist of the brief's seven export rules lived in a comment in `ExportRulesTests`, and three documents pointed at it — the list is now in `DECISIONS.md` under "The Export service's projects", where the conventions put a checklist, and the pointers retargeted. 292 passing, 2 skipped, 0 warnings |

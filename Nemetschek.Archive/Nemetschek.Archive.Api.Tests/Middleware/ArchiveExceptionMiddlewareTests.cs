@@ -10,9 +10,6 @@ namespace Nemetschek.Archive.Api.Tests.Middleware;
 /// <summary>
 /// The one place in the service that turns a refusal into a status code.
 /// </summary>
-// Every endpoint depends on this mapping, and the brief requires failures to reach callers in a
-// documented shape — so the two arms and the rethrow are each pinned here. A new expected refusal
-// should arrive with a row in this class.
 public sealed class ArchiveExceptionMiddlewareTests
 {
     [Fact]
@@ -42,7 +39,6 @@ public sealed class ArchiveExceptionMiddlewareTests
     [Fact]
     public async Task The_detail_is_the_rules_own_sentence_so_a_client_can_show_it()
     {
-        // The brief forbids the client from restating a server rule, so the server has to phrase it.
         var refusal = new UploadRefusedException("Amount", "Index field 'Amount' holds a number value; a text field is required.");
 
         var (_, problems, _) = await Invoke(refusal);
@@ -55,7 +51,6 @@ public sealed class ArchiveExceptionMiddlewareTests
     [Fact]
     public async Task An_unexpected_failure_is_rethrown_rather_than_dressed_as_a_refusal()
     {
-        // A bug must not be swallowed as a 400: it goes to UseExceptionHandler, which answers 500.
         var bug = new InvalidOperationException("something the Archive did not expect");
         var problems = new CapturingProblemDetailsService();
 
@@ -112,7 +107,6 @@ public sealed class ArchiveExceptionMiddlewareTests
     [Fact]
     public async Task A_refusal_is_not_logged_as_an_error()
     {
-        // A caller sending something unusable is not a fault of the service's.
         var (_, _, logger) = await Invoke(new UploadRefusedException("Status", "too long"));
 
         Assert.DoesNotContain(logger.Entries, entry => entry.Level >= LogLevel.Warning);

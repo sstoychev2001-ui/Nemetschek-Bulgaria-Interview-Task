@@ -11,9 +11,6 @@ namespace Nemetschek.Archive.Api.Tests.Endpoints;
 /// <summary>
 /// <c>POST /cabinets/{cabinet}/uploads</c>, against the real service in process.
 /// </summary>
-// The statuses here were verified by hand against the container for several sessions; this is the
-// same walk-through as a test, so a change to the middleware or the contract fails the build rather
-// than the demo.
 public sealed class UploadEndpointTests : IDisposable
 {
     private readonly ArchiveApplication application = new();
@@ -129,9 +126,6 @@ public sealed class UploadEndpointTests : IDisposable
     [Fact]
     public async Task A_missing_field_is_answered_400_in_the_frameworks_validation_shape()
     {
-        // Documented in README.md as the one place the error shape differs: model validation is not
-        // suppressed, so a missing form field answers ValidationProblemDetails rather than the
-        // middleware's ProblemDetails.
         var response = await client.PostAsync(
             "/cabinets/Invoices/uploads",
             Body(field: null, folderName: "sample-material", files: ["a.txt"]),

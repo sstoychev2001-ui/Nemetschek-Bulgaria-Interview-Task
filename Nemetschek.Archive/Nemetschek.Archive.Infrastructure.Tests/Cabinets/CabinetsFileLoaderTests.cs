@@ -21,9 +21,6 @@ public sealed class CabinetsFileLoaderTests
     private static IReadOnlyList<Cabinet> RealCabinets() => CabinetsFileLoader.Load(FixturePath);
 
     /// <summary>Loads cabinet definitions from a throwaway file holding the given content.</summary>
-    // The loader only takes a path, so the rule tests need a file. Deleted in a finally block because
-    // most of these calls are expected to throw, and the brief is explicit that an operation must not
-    // leave temporary files behind.
     private static IReadOnlyList<Cabinet> LoadFromJson(string json)
     {
         var path = Path.Combine(Path.GetTempPath(), $"cabinets-{Guid.NewGuid():N}.json");
@@ -38,8 +35,6 @@ public sealed class CabinetsFileLoaderTests
             File.Delete(path);
         }
     }
-
-    // --- the real fixture ---------------------------------------------------------------------
 
     [Fact]
     public void The_fixture_declares_exactly_the_two_cabinets_in_the_brief()
@@ -59,11 +54,6 @@ public sealed class CabinetsFileLoaderTests
     /// <summary>
     /// The whole fixture, field by field, stated here rather than compared to another copy of it.
     /// </summary>
-    // This used to compare against the hand-written cabinets in the TestSupport library, which was
-    // the only thing keeping those and the fixture from drifting apart. TestSupport is gone, and
-    // that guard now lives beside the hand-written copy as Core.Tests' TestCabinetsTests, which
-    // reads this same file. Here the expectation is spelled out instead, so a field added to the
-    // fixture and nowhere else fails on both sides.
     [Theory]
     [InlineData("Invoices", "InvoiceNumber|Invoice number|Text|20|True", "Supplier|Supplier|Text|60|True",
         "Amount|Amount|Number||True", "InvoiceDate|Invoice date|Date||True", "Batch|Batch|Text|100|True",
@@ -113,12 +103,8 @@ public sealed class CabinetsFileLoaderTests
     [Fact]
     public void The_fixture_has_read_only_fields_so_the_writability_rule_is_actually_exercised()
     {
-        // If the fixture ever lost its read-only fields, the rule would still be implemented but
-        // nothing real would depend on it.
         Assert.Contains(RealCabinets().SelectMany(c => c.Fields), f => !f.Writable);
     }
-
-    // --- loading from a catalog ---------------------------------------------------------------
 
     [Fact]
     public void The_catalog_finds_cabinets_case_insensitively()
@@ -131,15 +117,11 @@ public sealed class CabinetsFileLoaderTests
         Assert.Null(catalog.Find("Nonsense"));
     }
 
-    // --- a missing or unreadable file ---------------------------------------------------------
-
     [Fact]
     public void A_missing_file_is_refused_and_the_message_names_the_path()
     {
         var missing = Path.Combine(Path.GetTempPath(), "no-such-cabinets-file.json");
 
-        // The framework's own FileNotFoundException already names the file, so the loader does not
-        // pre-check existence or wrap it.
         var ex = Assert.Throws<FileNotFoundException>(() => CabinetsFileLoader.Load(missing));
 
         Assert.Equal(missing, ex.FileName);
@@ -149,17 +131,8 @@ public sealed class CabinetsFileLoaderTests
     [Fact]
     public void Malformed_json_is_refused()
     {
-        // Syntax is System.Text.Json's job; the loader assumes well-formed JSON and only validates what
-        // the content means, so a JsonException is left to propagate unwrapped.
         Assert.Throws<JsonException>(() => LoadFromJson("{ not json"));
     }
-
-    // --- structural validation ----------------------------------------------------------------
-    //
-    // Two mechanisms are in play and the tests below pin which does what, so neither can quietly stop
-    // working. A reference property that is absent or blank is caught by its [Required] attribute
-    // during deserialisation and reported as a ValidationException. An absent 'type' is caught by the
-    // serialiser instead, because FieldType is a value type and so can use the `required` keyword.
 
     [Fact]
     public void A_file_without_a_cabinets_property_is_refused()
@@ -229,13 +202,9 @@ public sealed class CabinetsFileLoaderTests
         Assert.Contains("Index field name A is not unique in cabinet X", ex.Message);
     }
 
-    // --- field validation ---------------------------------------------------------------------
-
     [Fact]
     public void An_unknown_field_type_is_refused()
     {
-        // FieldType is an enum with a string converter, so an unknown value cannot survive
-        // deserialisation. The message names the path to the offending field.
         var ex = Assert.Throws<JsonException>(() => LoadFromJson(
             """
             { "cabinets": [ { "name": "X", "displayName": "X", "fields": [
@@ -261,8 +230,6 @@ public sealed class CabinetsFileLoaderTests
     [Fact]
     public void A_field_without_a_type_is_refused()
     {
-        // Type is a value type, so it uses the `required` keyword and the serialiser reports its
-        // absence by name — an absent type must not silently default to Text.
         var ex = Assert.Throws<JsonException>(() => LoadFromJson(
             """
             { "cabinets": [ { "name": "X", "displayName": "X", "fields": [

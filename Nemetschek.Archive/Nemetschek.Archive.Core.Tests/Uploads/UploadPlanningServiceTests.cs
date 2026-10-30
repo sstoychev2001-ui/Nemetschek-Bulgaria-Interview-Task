@@ -11,8 +11,6 @@ namespace Nemetschek.Archive.Core.Tests.Uploads;
 /// <summary>
 /// The folder-to-documents mapping: one test per rule in the brief's "Upload rules".
 /// </summary>
-// The planner takes no ports, reads no content and touches no clock, so every rule here is an
-// offline assertion on a returned list. Test names are the rules, so a failure names what broke.
 public sealed class UploadPlanningServiceTests
 {
     private const string FolderName = "sample-material";
@@ -21,8 +19,6 @@ public sealed class UploadPlanningServiceTests
 
     private static readonly IndexField Batch =
         Invoices.Fields.Single(field => field.Name == "Batch");
-
-    // --- each top-level entry becomes one document -------------------------------------------
 
     [Fact]
     public void A_top_level_file_becomes_one_document_with_one_part()
@@ -65,15 +61,12 @@ public sealed class UploadPlanningServiceTests
     [Fact]
     public void A_folder_that_holds_files_is_not_duplicated_when_the_client_also_names_it()
     {
-        // This is why `folders` can be left out for an ordinary folder: its files already imply it.
         var planned = Plan(files: ["delivery/page1.txt"], folders: ["delivery"]);
 
         var entry = Assert.Single(planned);
         Assert.Equal("delivery", entry.Entry);
         Assert.Equal(["page1.txt"], PartNames(entry));
     }
-
-    // --- anything nested deeper is ignored and reported ---------------------------------------
 
     [Fact]
     public void A_file_nested_more_than_one_folder_deep_is_skipped_and_reported()
@@ -88,8 +81,6 @@ public sealed class UploadPlanningServiceTests
     [Fact]
     public void A_folder_holding_only_a_nested_subfolder_still_becomes_a_document()
     {
-        // The top-level entry is registered before the depth check, so the user still gets the
-        // document the brief promises for every top-level entry — with no parts.
         var planned = Plan(files: ["delivery/archive/old-page.txt"]);
 
         var stored = Single(planned, UploadEntryOutcome.Stored);
@@ -109,8 +100,6 @@ public sealed class UploadPlanningServiceTests
             SkippedEntries(withIt).Order(StringComparer.Ordinal));
     }
 
-    // --- part order ---------------------------------------------------------------------------
-
     [Fact]
     public void Parts_are_ordered_ordinally_so_page10_sorts_before_page2()
     {
@@ -127,8 +116,6 @@ public sealed class UploadPlanningServiceTests
 
         Assert.Equal(["A.txt", "a.txt", "b.txt"], Titles(planned));
     }
-
-    // --- titles and the chosen field ----------------------------------------------------------
 
     [Fact]
     public void The_title_is_the_entry_name_including_its_extension()
@@ -178,15 +165,12 @@ public sealed class UploadPlanningServiceTests
     [Fact]
     public void A_planned_document_carries_no_id_and_no_timestamps_yet()
     {
-        // The store owns the system fields; the planner must not pre-empt them.
         var draft = Assert.Single(Plan(files: ["a.txt"])).Draft!;
 
         Assert.Equal(Guid.Empty, draft.Id);
         Assert.Equal(default, draft.StoredAt);
         Assert.Equal(default, draft.ModifiedAt);
     }
-
-    // --- untrusted paths ----------------------------------------------------------------------
 
     [Theory]
     [InlineData("/etc/passwd")]
@@ -230,8 +214,6 @@ public sealed class UploadPlanningServiceTests
         Assert.Equal(["page1.txt"], PartNames(entry));
     }
 
-    // --- text ---------------------------------------------------------------------------------
-
     [Theory]
     [InlineData("Договор София.txt")]
     [InlineData("Фактури Q1")]
@@ -250,8 +232,6 @@ public sealed class UploadPlanningServiceTests
     {
         Assert.Empty(Plan());
     }
-
-    // --- helpers ------------------------------------------------------------------------------
 
     private static IReadOnlyList<UploadEntry> Plan(
         string[]? files = null,

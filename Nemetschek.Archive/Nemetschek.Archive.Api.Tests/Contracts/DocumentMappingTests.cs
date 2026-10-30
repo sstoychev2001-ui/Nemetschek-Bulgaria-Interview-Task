@@ -45,8 +45,6 @@ public sealed class DocumentMappingTests
     [Fact]
     public void A_part_never_carries_content_to_the_client()
     {
-        // The response is metadata only: there is no content endpoint yet, and when there is one it
-        // will stream rather than inline bytes. See "Missing" in DECISIONS.md.
         Assert.DoesNotContain(
             "Content",
             typeof(Api.Contracts.Documents.Responses.PartResponse)
@@ -92,8 +90,6 @@ public sealed class DocumentMappingTests
     [Fact]
     public void A_number_value_maps_to_the_number_itself_not_a_string()
     {
-        // Leaving it a decimal keeps the client from having to parse, and keeps a thousands
-        // separator from ever appearing in the payload.
         var response = new IndexValue.Number(1234.56m).ToResponse();
 
         Assert.Equal(FieldType.Number, response.Type);
@@ -112,8 +108,6 @@ public sealed class DocumentMappingTests
     [Fact]
     public void A_date_is_formatted_invariantly_whatever_culture_the_container_runs_in()
     {
-        // InvariantGlobalization is deliberately off for the export's time-zone handling, so the
-        // culture is a real variable. An Umm al-Qura calendar would render 1447-08-12 without this.
         var original = CultureInfo.CurrentCulture;
         try
         {

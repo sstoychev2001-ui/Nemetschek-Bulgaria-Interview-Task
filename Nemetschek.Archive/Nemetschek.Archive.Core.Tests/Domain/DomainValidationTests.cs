@@ -7,10 +7,6 @@ namespace Nemetschek.Archive.Core.Tests.Domain;
 /// <summary>
 /// The rules the domain types declare on themselves, as <c>Validate</c> reports them.
 /// </summary>
-// These run on deserialisation — IJsonOnDeserialized calls Validator.ValidateObject — so they are
-// what stands between a hand-edited cabinets.json or document.json and a service that starts up
-// believing nonsense. Asserted directly here because going through a file would test the loader
-// instead, which Infrastructure.Tests already does.
 public sealed class DomainValidationTests
 {
     [Theory]
@@ -35,7 +31,6 @@ public sealed class DomainValidationTests
     [InlineData(null)]
     public void An_index_field_with_a_usable_limit_is_valid(int? maxLength)
     {
-        // null is unbounded, which every number and date field in the fixture relies on.
         var field = new IndexField
         {
             Name = "Status", Label = "Status", Type = FieldType.Text, MaxLength = maxLength,
@@ -47,8 +42,6 @@ public sealed class DomainValidationTests
     [Fact]
     public void A_stored_document_without_an_id_is_invalid()
     {
-        // A document.json read back without an id would otherwise flow into a response as
-        // Guid.Empty, which a client cannot ask for again.
         var document = Document.ToStore("Invoices", "invoice-001.txt", Values(), []);
 
         Assert.Contains(

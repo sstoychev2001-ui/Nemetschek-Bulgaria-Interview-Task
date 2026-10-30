@@ -7,9 +7,6 @@ namespace Nemetschek.Archive.Core.Tests.Cabinets;
 /// <summary>
 /// The two cabinets from fixtures/cabinets.json, built in code.
 /// </summary>
-// Rule tests use these so they do not depend on file IO. TestCabinetsTests is what keeps them
-// honest: it reads fixtures/cabinets.json itself and compares, so a fixture change that is not
-// mirrored here fails rather than leaving every rule test passing against the wrong schema.
 public static class TestCabinets
 {
     public static Cabinet Invoices() => new()

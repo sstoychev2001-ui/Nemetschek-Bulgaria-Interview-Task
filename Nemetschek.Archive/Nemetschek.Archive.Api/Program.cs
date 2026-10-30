@@ -17,9 +17,6 @@ builder.Services.AddProblemDetails();
 
 builder.Services.AddHttpLogging(options =>
 {
-    // Deliberately neither bodies nor headers: an upload body is untrusted and up to
-    // Archive:MaxUploadBytes large, and a header is where a credential would appear once there is
-    // one. CombineLogs makes it one line per request instead of one per field.
     options.LoggingFields = HttpLoggingFields.RequestMethod
                             | HttpLoggingFields.RequestPath
                             | HttpLoggingFields.RequestQuery
@@ -29,18 +26,13 @@ builder.Services.AddHttpLogging(options =>
 });
 
 var cabinetsFile = builder.Configuration["Archive:CabinetsFile"]
-                   ?? throw new InvalidOperationException(
-                       "Setting 'Archive:CabinetsFile' is required: it is the path to cabinets.json. " +
-                       "Set it in appsettings, or as the environment variable Archive__CabinetsFile.");
+    ?? throw new InvalidOperationException("Setting 'Archive:CabinetsFile' is required");
 
 var resolvedCabinetsFile = CabinetsServiceCollectionExtensions.ResolvePath(
     cabinetsFile, builder.Environment.ContentRootPath);
 
 var storagePath = builder.Configuration["Archive:StoragePath"]
-                  ?? throw new InvalidOperationException(
-                      "Setting 'Archive:StoragePath' is required: it is the directory the Archive " +
-                      "keeps documents in, and it must survive a container restart. Set it in " +
-                      "appsettings, or as the environment variable Archive__StoragePath.");
+    ?? throw new InvalidOperationException("Setting 'Archive:StoragePath' is required");
 
 var resolvedStoragePath = CabinetsServiceCollectionExtensions.ResolvePath(
     storagePath, builder.Environment.ContentRootPath);
@@ -69,9 +61,6 @@ var app = builder.Build();
 app.Logger.LogInformation("Loaded cabinet definitions from {CabinetsFile}", resolvedCabinetsFile);
 app.Logger.LogInformation("Storing documents under {StoragePath}", resolvedStoragePath);
 
-// First in the pipeline, so the line it writes carries the status the caller actually received.
-// The health probe runs every ten seconds and says nothing about a request anyone made, so it is
-// kept out — otherwise it is all the log would hold.
 app.UseWhen(
     context => !context.Request.Path.StartsWithSegments("/health"),
     requests => requests.UseHttpLogging());
@@ -91,4 +80,3 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 });
 
 app.Run();
-

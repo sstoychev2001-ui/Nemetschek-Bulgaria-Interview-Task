@@ -7,11 +7,6 @@ namespace Nemetschek.Archive.Core.Tests.Cabinets;
 /// <summary>
 /// Keeps <see cref="TestCabinets"/> honest against the real <c>fixtures/cabinets.json</c>.
 /// </summary>
-// Every rule test in this project runs against the hand-written cabinets, so if the fixture gained a
-// field, lost one, or changed a limit, all of them would keep passing while testing a schema the
-// service never sees. This test is the only thing standing between that and a false green. It reads
-// the JSON itself rather than through CabinetsFileLoader, because the loader lives in
-// Infrastructure and Core.Tests must not reference it.
 public sealed class TestCabinetsTests
 {
     [Theory]

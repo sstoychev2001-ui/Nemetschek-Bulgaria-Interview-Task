@@ -26,8 +26,6 @@ public sealed class CabinetCatalogTests
     [InlineData(" Invoices")]
     public void A_name_that_is_not_a_cabinet_is_not_found(string asked)
     {
-        // Null rather than an exception: the caller decides what a miss means, and for an upload
-        // that is UnknownCabinetException with the name the caller used.
         Assert.Null(Catalog().Find(asked));
     }
 
@@ -40,8 +38,6 @@ public sealed class CabinetCatalogTests
     [Fact]
     public void An_empty_catalog_finds_nothing_and_lists_nothing()
     {
-        // The readiness check reads All.Count, so an empty catalog has to be observable rather than
-        // throwing on construction.
         var empty = new CabinetCatalog([]);
 
         Assert.Empty(empty.All);

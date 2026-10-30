@@ -14,13 +14,8 @@ namespace Nemetschek.Archive.Core.Tests.Uploads;
 /// <summary>
 /// Running an upload: what is refused outright, what becomes a row, and what the report says.
 /// </summary>
-// The store is a fake, so these are rule tests and not storage tests: the real store is covered by
-// DocumentsStoreServiceTests against a temp directory. The split matters for the brief's "a partial
-// failure is never silent" — the only way to assert it is to make one document fail on demand.
 public sealed class UploadServiceTests
 {
-    // --- refusals, which are terminal and store nothing ----------------------------------------
-
     [Fact]
     public async Task An_unknown_cabinet_is_refused()
     {
@@ -52,7 +47,6 @@ public sealed class UploadServiceTests
     [Fact]
     public async Task A_folder_name_longer_than_the_field_allows_is_refused()
     {
-        // Status accepts 12 characters; "sample-material" is 15.
         var store = new FakeStore();
 
         var refusal = await Assert.ThrowsAsync<UploadRefusedException>(
@@ -90,8 +84,6 @@ public sealed class UploadServiceTests
         Assert.Equal("Batch", report.FieldName);
     }
 
-    // --- the report ---------------------------------------------------------------------------
-
     [Fact]
     public async Task The_report_names_the_cabinet_the_field_and_the_folder()
     {
@@ -118,7 +110,6 @@ public sealed class UploadServiceTests
     [Fact]
     public async Task A_stored_entry_keeps_no_draft_once_it_is_stored()
     {
-        // The draft holds open-content callbacks; leaving it on the report would keep them alive.
         var report = await Upload(new FakeStore(), files: ["a.txt"]);
 
         Assert.Null(Assert.Single(report.Results).Draft);
@@ -153,8 +144,6 @@ public sealed class UploadServiceTests
             report.Results.Select(entry => entry.Outcome));
     }
 
-    // --- a partial failure is never silent -----------------------------------------------------
-
     [Fact]
     public async Task One_document_failing_does_not_stop_the_others()
     {
@@ -184,7 +173,6 @@ public sealed class UploadServiceTests
     [Fact]
     public async Task Cancellation_is_not_turned_into_a_failed_row()
     {
-        // There is nobody left to read the report, so cancellation propagates instead.
         var store = new FakeStore { CancelFor = "a.txt" };
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => Upload(store, files: ["a.txt"]));
@@ -216,8 +204,6 @@ public sealed class UploadServiceTests
                     document.IndexValues["Batch"]).Value);
         }
     }
-
-    // --- helpers ------------------------------------------------------------------------------
 
     private static Task<UploadReport> Upload(
         FakeStore store,

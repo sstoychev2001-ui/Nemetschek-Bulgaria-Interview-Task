@@ -30,8 +30,6 @@ public sealed class DocumentsServiceTests
     [InlineData("INVOICES")]
     public async Task A_cabinet_is_found_case_insensitively_and_read_under_its_own_name(string asked)
     {
-        // The store turns the name into a directory, so it must get the catalog's spelling and not
-        // the caller's — otherwise the same cabinet could end up with two directories.
         var store = new RecordingStore();
 
         await Service(store).ListAsync(asked, 0, 10, CancellationToken.None);

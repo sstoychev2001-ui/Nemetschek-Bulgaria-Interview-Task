@@ -7,7 +7,8 @@ uploaded as folders of material and exported back out as zip archives.
 survive `down` + `up` — verified on Podman 6.1.4 via `podman compose`. The Archive serves two
 routes, an upload and a paged read. Still missing on the Archive itself: reading a part's content
 over HTTP, updating index values, the date-range filter, `GET /cabinets` and a CORS policy — the
-first two of which the Export service needs. No Export service and no web client.**
+first two of which the Export service needs. The Export service has its six projects, its OpenAPI
+description and a liveness endpoint, but no export rules. No web client.**
 See [`DECISIONS.md`](DECISIONS.md) for exactly what is built and what is missing, and how each gap
 would be closed.
 
@@ -16,7 +17,7 @@ would be closed.
 | Piece | Technology | Status |
 |---|---|---|
 | Archive service | ASP.NET Core 9 | Field rules, upload, durable storage, paged read, `/health` |
-| Export service | ASP.NET Core 9 | Not started |
+| Export service | ASP.NET Core 9 | Projects scaffolded, no export rules yet |
 | Web client | TBD | Not started |
 
 The Export service never touches the Archive's storage; it only uses the Archive's HTTP API.
@@ -32,6 +33,7 @@ Nemetschek.Archive/
 ├── Nemetschek.Archive.Core/              the rules, no external dependencies
 ├── Nemetschek.Archive.Infrastructure/    adapters for storage and fixtures
 └── Nemetschek.Archive.*.Tests/           one test project per production project, offline
+Nemetschek.Export/                        the same six projects; rules not written yet
 fixtures/                            cabinets.json and sample-material.zip (given)
 ```
 
@@ -140,7 +142,7 @@ Tests need no containers and run straight from the repository. Requires the .NET
 
 ```bash
 dotnet build                        # warnings are errors
-dotnet test                         # offline, no containers — 281 tests
+dotnet test                         # offline, no containers — 292 tests, plus 2 skipped
 dotnet test --collect:"XPlat Code Coverage"   # 98.9% of lines
 ```
 

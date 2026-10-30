@@ -10,10 +10,6 @@ namespace Nemetschek.Archive.Core.Tests.Documents;
 /// What the store does and what it writes down. Runs against a throwaway directory: no container,
 /// no network.
 /// </summary>
-// The failure test is the one that matters most: UploadService catches a store exception and turns
-// it into a Failed row, so if the LogError went missing, a disk that had stopped accepting writes
-// would answer 200 and leave nothing in the container log. That is how the behaviour was lost once
-// already — see the UploadFailureStatusMiddleware note in DECISIONS.md.
 public sealed class DocumentsStoreServiceTests : IDisposable
 {
     private readonly string root =
@@ -31,8 +27,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         return new DocumentsStoreService(root, clock, logger);
     }
 
-    // --- logging ------------------------------------------------------------------------------
-
     [Fact]
     public async Task A_stored_document_is_logged_with_its_id()
     {
@@ -48,8 +42,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [Fact]
     public async Task A_store_failure_is_logged_with_its_exception_and_rethrown()
     {
-        // A part on its way in must carry OpenContent; one without it is the store's own
-        // InvalidOperationException, raised after the staging directory already exists.
         var failure = await Assert.ThrowsAsync<InvalidOperationException>(
             () => Store().AddAsync(Draft(new Part { Name = "page1.txt" }), CancellationToken.None));
 
@@ -61,11 +53,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [Fact]
     public async Task A_cancelled_store_is_logged_at_Error_like_any_other_failure()
     {
-        // Asserting what the store does, not what it arguably should: the `catch` arm logs every
-        // exception, cancellation included. An upload the caller abandoned therefore appears in the
-        // log as an Error, indistinguishable from a volume that stopped accepting writes.
-        // `UploadService.StoreOneAsync` does filter cancellation, so the report itself is unaffected
-        // — see "What the service logs" in DECISIONS.md.
         var draft = Draft(Part.ToStore("page1.txt", () => throw new OperationCanceledException()));
 
         await Assert.ThrowsAsync<OperationCanceledException>(
@@ -79,13 +66,10 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [Fact]
     public async Task Reading_a_page_logs_nothing()
     {
-        // Reads are accounted for by the per-request HTTP log, so the store stays quiet.
         await Store().ListAsync("Invoices", skip: 0, take: 10, CancellationToken.None);
 
         Assert.Empty(logger.Entries);
     }
-
-    // --- storing and reading back --------------------------------------------------------------
 
     [Fact]
     public async Task A_stored_document_comes_back_from_disk_as_it_went_in()
@@ -137,7 +121,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [Fact]
     public async Task An_id_carries_the_time_it_was_stored()
     {
-        // Version 7 GUIDs are built from the timestamp, which is what makes an id sortable.
         var stored = await Store().AddAsync(
             Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
 
@@ -156,8 +139,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [Fact]
     public async Task A_users_name_never_becomes_a_file_name()
     {
-        // The brief's rule: user-supplied names are data. Content is addressed by a generated id,
-        // and the name the user chose lives inside document.json as text.
         var store = Store();
         var stored = await store.AddAsync(
             Draft(Part.ToStore("Договор София.txt", Content)), CancellationToken.None);
@@ -230,8 +211,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         Assert.Equal(2, page.Documents.Select(document => document.Id).Distinct().Count());
     }
 
-    // --- paging -------------------------------------------------------------------------------
-
     [Fact]
     public async Task Documents_come_back_oldest_first_across_day_boundaries()
     {
@@ -300,8 +279,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
             Assert.Single((await store.ListAsync("Contracts", 0, 10, CancellationToken.None)).Documents).Title);
     }
 
-    // --- untrusted cabinet names ---------------------------------------------------------------
-
     [Theory]
     [InlineData("../escape")]
     [InlineData("nested/name")]
@@ -311,8 +288,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [InlineData("")]
     public async Task A_cabinet_name_that_is_not_a_single_directory_name_is_refused(string cabinetName)
     {
-        // Defence in depth: the catalog has already proved the cabinet exists by the time the store
-        // is called, so this can only fire if something upstream stops checking.
         var store = Store();
 
         await Assert.ThrowsAsync<ArgumentException>(
@@ -321,8 +296,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
             () => store.AddAsync(
                 Document.ToStore(cabinetName, "title", Values(), []), CancellationToken.None));
     }
-
-    // --- preparing the storage root ------------------------------------------------------------
 
     [Fact]
     public void Prepare_creates_the_directories_the_store_and_the_probe_need()
@@ -376,7 +349,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     [Fact]
     public void A_root_whose_staging_directory_is_gone_is_not_writable()
     {
-        // This is what makes /health/ready answer 503 on a volume that was never prepared.
         var store = Store();
         Directory.Delete(Path.Combine(root, "tmp"), recursive: true);
 
@@ -406,8 +378,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
             Directory.Delete(root, recursive: true);
         }
     }
-
-    // --- helpers ------------------------------------------------------------------------------
 
     private static CancellationToken TestToken => CancellationToken.None;
 

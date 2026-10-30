@@ -51,7 +51,13 @@ Nemetschek.Archive/
     ├── Contracts/     paging arithmetic and every mapping
     ├── Endpoints/     the real service in process, via WebApplicationFactory
     └── Middleware/    the one place that picks a status code
-Nemetschek.Export/                       _(planned)_ same shape
+Nemetschek.Export/                       same shape; projects only, no rules yet
+├── Nemetschek.Export.Api/               the export endpoint, DTOs, error shape, DI, OpenAPI
+├── Nemetschek.Export.Core/              the export rules — NO package references
+├── Nemetschek.Export.Infrastructure/    the Archive HTTP client, the zip writer, registrations
+├── Nemetschek.Export.Core.Tests/        one test project per production project
+├── Nemetschek.Export.Infrastructure.Tests/
+└── Nemetschek.Export.Api.Tests/         boots the scaffold through WebApplicationFactory
 ```
 
 **One test project per production project**, named `<Project>.Tests` and referencing only its
@@ -75,7 +81,9 @@ Nothing under `Nemetschek.Archive.*` may reference `Nemetschek.Export.*`, or the
 service reaches the Archive over HTTP only, with its own client DTOs. That duplication is deliberate.
 
 **These rules are enforced by tests, not by trust** — see
-`Nemetschek.Archive.Api.Tests/Architecture/ProjectDependencyTests.cs`. It reads the real csproj files, so a
+`Nemetschek.Archive.Api.Tests/Architecture/ProjectDependencyTests.cs`, which covers **both**
+services. It reads csproj files rather than referencing projects, so one place can enforce the
+layering of each service without either depending on the other. It reads the real csproj files, so a
 cross-layer or cross-service reference fails `dotnet test`. If one of those tests fails, the fix is
 almost always to move the code, not to change the test.
 
@@ -83,8 +91,9 @@ almost always to move the code, not to change the test.
 `.sln` is only a list of projects for tooling and does not enforce a boundary (a `ProjectReference`
 works across solution membership), while a root solution is what lets `dotnet test` from a clean clone
 cover everything in one command. To work on one service in isolation, use a `.slnf` solution filter
-rather than adding a second `.sln`. When the Export service arrives, add its projects to
-`Nemetschek.sln` — `Every_project_in_the_repository_is_in_the_solution` will fail if you forget.
+rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` —
+`Every_project_in_the_repository_is_in_the_solution` fails if a new one is left out, and
+`Both_services_have_the_same_shape` fails if one service gains a project the other lacks.
 
 ## Where the rules live
 
@@ -104,7 +113,8 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
 | Running an upload: validate, store per document, report | `Core/Domain/Uploads/UploadService.cs` |
 | Upload size and part-count limits | `Program.cs`, from `Archive:MaxUploadBytes` and `Archive:MaxUploadEntries` |
 | Which HTTP status a refusal answers with | `Api/Middleware/ArchiveExceptionMiddleware.cs` — a `switch` over the expected exception types, one arm each. `UnknownCabinetException` → `404`, `UploadRefusedException` → `400`, anything else rethrown for `UseExceptionHandler` → `500`. A new expected refusal is one more arm |
-| Zip layout, duplicate-title naming, marker format (export rules) | Export service _(planned)_ |
+| Zip layout, duplicate-title naming, marker format (export rules) | `Nemetschek.Export.Core` — **the project exists, the rules do not**. The seven rules are listed in `DECISIONS.md` under "The Export service's projects"; `Nemetschek.Export.Core.Tests/ExportRulesTests.cs` is the skipped placeholder they land in |
+| Reading the Archive from the Export service | `Nemetschek.Export.Infrastructure` _(planned)_ — over HTTP only, with its own DTOs. Enforced both ways by `No_Archive_project_references_an_Export_project` and `No_Export_project_references_an_Archive_project` |
 | Date-range semantics (inclusive calendar dates, user's time zone) | Archive query API _(planned)_ |
 | Reading a part's content | _(planned)_ — no endpoint yet, and the Export service cannot be built without one. It belongs beside `Documents` in `CabinetsController`, streaming the part file the store addresses by id |
 | Updating index values | _(planned)_ — no endpoint yet. The write rule already exists (`IndexFieldRules.ValidateWrite`); what is missing is the endpoint, `ModifiedAt`, and a rewrite of `document.json` by the same staging-and-rename route as `AddAsync` |
@@ -130,6 +140,10 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
   states the behaviour and the disagreement is recorded in `DECISIONS.md` — a test written against
   an intention the code does not hold is a test that fails for the wrong reason. The store logging
   a cancelled upload at `Error` is the live example.
+- **A skipped test is how an owed rule is recorded, not how a failing one is silenced.** The two
+  placeholders in the Export test projects carry a `Skip` reason naming what is missing and pointing
+  at `DECISIONS.md`. They exist so `dotnet test` reads as "owed" rather than printing "No test is
+  available", and so the rules arrive with a home. Never add `Skip` to a test that used to pass.
 - **An endpoint is tested through the real service.** `Api.Tests/Endpoints/ArchiveApplication.cs` is
   a `WebApplicationFactory` over `Program.cs` on a temp storage directory, so the statuses, the
   error shapes, the page cap and the health endpoints are covered as a caller sees them, with no
@@ -186,7 +200,10 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
   hierarchy becomes a tagged shape, and `IFormFile` becomes a `Func<Stream>` — so a convention-based
   mapper would need custom converters for exactly the parts that are hard. If one is ever wanted,
   it should be Mapperly: MIT, source-generated, and it fails at compile time rather than at runtime.
-- **No comments except `<summary>` blocks.** Rationale belongs in `DECISIONS.md`, not inline.
+- **No comments except `<summary>` blocks, in test code as much as in production code.** A test's
+  name is its explanation; if a test needs a paragraph to justify it, that paragraph is a
+  decision and belongs in `DECISIONS.md`. The test projects were swept clean of inline comments
+  on 2026-10-30 — 168 lines of them — so a file that grows one back is a file to fix.
 - **Anything that depends on how an operation *went* lives in middleware, not in the endpoint.**
   `ArchiveExceptionMiddleware` is the only place in the service that picks a status code. Core
   throws for a refusal that is terminal — `UnknownCabinetException`, `UploadRefusedException` — and
@@ -242,7 +259,7 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
 
 ```bash
 dotnet build          # warnings are errors
-dotnet test           # offline, no containers — 281 tests across three test projects
+dotnet test           # offline, no containers — 292 tests across six test projects, plus 2 skipped
 dotnet test --collect:"XPlat Code Coverage"   # 98.9% of lines at time of writing
 docker compose up --build   # the supported way to run it; rebuilds and recreates in one command
 

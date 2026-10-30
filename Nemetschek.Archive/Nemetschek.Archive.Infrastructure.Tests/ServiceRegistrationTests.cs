@@ -10,14 +10,10 @@ namespace Nemetschek.Archive.Infrastructure.Tests;
 /// <summary>
 /// What the two <c>Add…</c> extensions wire up, and what they refuse to start without.
 /// </summary>
-// Startup being fail-fast is a documented property: a storage root or a cabinets file the service
-// cannot use stops it rather than failing the first request. These tests are that property.
 public sealed class ServiceRegistrationTests : IDisposable
 {
     private readonly string root =
         Path.Combine(Path.GetTempPath(), $"archive-registration-{Guid.NewGuid():N}");
-
-    // --- the cabinet catalog -------------------------------------------------------------------
 
     [Fact]
     public void The_catalog_is_registered_from_the_given_cabinets_file()
@@ -32,7 +28,6 @@ public sealed class ServiceRegistrationTests : IDisposable
     [Fact]
     public void The_catalog_is_read_once_and_shared()
     {
-        // cabinets.json is fixed, so the catalog is the one thing the Archive may hold in memory.
         var provider = Provider(services =>
             services.AddCabinetCatalog(RepositoryFixtures.CabinetsFile, root));
 
@@ -50,14 +45,12 @@ public sealed class ServiceRegistrationTests : IDisposable
         var failure = Assert.Throws<FileNotFoundException>(() =>
             new ServiceCollection().AddCabinetCatalog(missing, root));
 
-        // The SDK's own exception carries the path, which is why no custom type was invented.
         Assert.Equal(missing, failure.FileName);
     }
 
     [Fact]
     public void A_cabinets_path_whose_directory_is_not_there_also_stops_startup()
     {
-        // A forgotten bind mount looks like this rather than like a missing file.
         Assert.Throws<DirectoryNotFoundException>(() =>
             new ServiceCollection().AddCabinetCatalog(
                 Path.Combine(root, "no-such-directory", "cabinets.json"), root));
@@ -83,12 +76,9 @@ public sealed class ServiceRegistrationTests : IDisposable
         Assert.Contains("ready", check.Tags);
     }
 
-    // --- the document store --------------------------------------------------------------------
-
     [Fact]
     public void The_store_is_registered_under_the_port_and_the_concrete_type()
     {
-        // The rules depend on the port; the readiness probe needs the concrete store.
         var provider = Provider(services => services.AddDocumentsStore(root, root));
 
         Assert.Same(
@@ -138,7 +128,6 @@ public sealed class ServiceRegistrationTests : IDisposable
     [Fact]
     public void A_storage_path_that_cannot_be_created_stops_startup()
     {
-        // A file where the directory should be: the closest portable stand-in for an unusable mount.
         Directory.CreateDirectory(root);
         var file = Path.Combine(root, "occupied");
         File.WriteAllBytes(file, []);
@@ -160,7 +149,6 @@ public sealed class ServiceRegistrationTests : IDisposable
     [Fact]
     public async Task Both_readiness_checks_report_healthy_on_a_usable_deployment()
     {
-        // The closest a test can get to `/health/ready` without a container.
         var provider = Provider(services => services
             .AddCabinetCatalog(RepositoryFixtures.CabinetsFile, root)
             .AddDocumentsStore(root, root));

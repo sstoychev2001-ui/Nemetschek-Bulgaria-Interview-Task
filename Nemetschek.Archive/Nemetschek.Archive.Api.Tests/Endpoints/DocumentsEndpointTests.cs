@@ -10,8 +10,6 @@ namespace Nemetschek.Archive.Api.Tests.Endpoints;
 /// <summary>
 /// <c>GET /cabinets/{cabinet}/documents</c>, against the real service in process.
 /// </summary>
-// The page cap is run at 5 here on purpose: that is the setting the review demo uses, and it is the
-// brief's "the maximum page size is configurable".
 public sealed class DocumentsEndpointTests : IDisposable
 {
     private readonly ArchiveApplication application = new() { MaxPageSize = 5 };
@@ -134,8 +132,6 @@ public sealed class DocumentsEndpointTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    // --- health and the API description --------------------------------------------------------
-
     [Fact]
     public async Task Liveness_answers_without_running_any_check()
     {
@@ -156,7 +152,6 @@ public sealed class DocumentsEndpointTests : IDisposable
     [Fact]
     public async Task The_service_describes_itself_in_OpenAPI()
     {
-        // The brief requires the description to be browsable while the service runs.
         var response = await client.GetAsync("/openapi/v1.json", Token);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

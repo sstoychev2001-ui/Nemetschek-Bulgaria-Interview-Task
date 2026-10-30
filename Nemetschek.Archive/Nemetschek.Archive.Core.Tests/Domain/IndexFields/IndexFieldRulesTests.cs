@@ -12,8 +12,6 @@ namespace Nemetschek.Archive.Core.Tests.Domain.IndexFields;
 /// </summary>
 public sealed class IndexFieldRulesTests
 {
-    // --- writable -----------------------------------------------------------------------------
-
     [Theory]
     [InlineData("ApprovedBy")]
     public void Write_to_a_non_writable_field_is_refused(string fieldName)
@@ -45,8 +43,6 @@ public sealed class IndexFieldRulesTests
         Assert.Null(violation);
     }
 
-    // --- unknown fields -----------------------------------------------------------------------
-
     [Fact]
     public void Write_to_a_field_the_cabinet_does_not_have_is_refused()
     {
@@ -65,8 +61,6 @@ public sealed class IndexFieldRulesTests
 
         Assert.Null(violation);
     }
-
-    // --- types --------------------------------------------------------------------------------
 
     [Fact]
     public void Text_value_in_a_number_field_is_refused()
@@ -115,12 +109,9 @@ public sealed class IndexFieldRulesTests
         Assert.Null(violation);
     }
 
-    // --- maxLength ----------------------------------------------------------------------------
-
     [Fact]
     public void Text_value_at_the_limit_is_allowed()
     {
-        // Status has maxLength 12.
         var violation = IndexFieldRules.ValidateWrite(
             TestCabinets.Invoices(), "Status", new IndexValue.Text(new string('x', 12)));
 
@@ -142,8 +133,6 @@ public sealed class IndexFieldRulesTests
     [Fact]
     public void The_sample_folder_name_does_not_fit_the_Status_field()
     {
-        // "sample-material" is 15 characters; Status allows 12. The brief's round trip uploads this
-        // folder, so a clear refusal here is the documented behaviour, not a truncation.
         var violation = IndexFieldRules.ValidateWrite(
             TestCabinets.Invoices(), "Status", new IndexValue.Text("sample-material"));
 
@@ -178,8 +167,6 @@ public sealed class IndexFieldRulesTests
         static IndexField Field(string name) =>
             TestCabinets.Invoices().Fields.Single(field => field.Name == name);
     }
-
-    // --- choosing the upload / marker field ---------------------------------------------------
 
     [Theory]
     [InlineData("InvoiceNumber")]
