@@ -1,7 +1,6 @@
 using System.Xml.Linq;
-using Nemetschek.Archive.Core.Domain.Documents;
 
-namespace Nemetschek.Archive.TestSupport;
+namespace Nemetschek.Archive.Api.Tests.Architecture;
 
 /// <summary>
 /// Locates files in the repository from a test run, so tests can assert on the real csproj files and
@@ -40,11 +39,9 @@ public static class RepositoryLayout
             .Order(StringComparer.Ordinal)
             .ToList();
 
-    /// <summary>The names of the projects that are not test or test-support projects.</summary>
+    /// <summary>The names of the projects that are not test projects.</summary>
     public static IEnumerable<string> ProductionProjects =>
-        ProjectFiles.Keys.Where(name =>
-            !name.EndsWith(".Tests", StringComparison.Ordinal) &&
-            !name.EndsWith(".TestSupport", StringComparison.Ordinal));
+        ProjectFiles.Keys.Where(name => !name.EndsWith(".Tests", StringComparison.Ordinal));
 
     private static IEnumerable<string> ItemsOf(string projectName, string itemName)
     {

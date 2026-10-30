@@ -31,8 +31,7 @@ Nemetschek.Archive/
 ├── Nemetschek.Archive.Api/               HTTP surface, OpenAPI
 ├── Nemetschek.Archive.Core/              the rules, no external dependencies
 ├── Nemetschek.Archive.Infrastructure/    adapters for storage and fixtures
-├── Nemetschek.Archive.*.Tests/           one test project per production project, offline
-└── Nemetschek.Archive.TestSupport/       shared test helpers
+└── Nemetschek.Archive.*.Tests/           one test project per production project, offline
 fixtures/                            cabinets.json and sample-material.zip (given)
 ```
 
@@ -141,8 +140,13 @@ Tests need no containers and run straight from the repository. Requires the .NET
 
 ```bash
 dotnet build                        # warnings are errors
-dotnet test                         # offline, no containers — 70 tests
+dotnet test                         # offline, no containers — 281 tests
+dotnet test --collect:"XPlat Code Coverage"   # 98.9% of lines
 ```
+
+The endpoint tests boot the real service in process with `WebApplicationFactory`, on a throwaway
+storage directory and the repository's own `fixtures/cabinets.json` — so `dotnet test` covers the
+two routes, their statuses and the page cap without a container or a network.
 
 `dotnet run` deliberately has no built-in configuration: both paths below are required and have no
 defaults, so running from source means supplying them. This is so a missing setting can never

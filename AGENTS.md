@@ -40,17 +40,30 @@ Nemetschek.Archive/
 │   ├── Cabinets/    CabinetsFileLoader — reads the deployment's cabinets.json
 │   ├── Health/      CabinetCatalogHealthCheck, DocumentStorageHealthCheck
 │   └── *ServiceCollectionExtensions — the dependency registrations
-├── Nemetschek.Archive.Core.Tests/            one test project per production project
-├── Nemetschek.Archive.Infrastructure.Tests/
-├── Nemetschek.Archive.Api.Tests/        also holds the solution-wide architecture tests
-└── Nemetschek.Archive.TestSupport/      shared test helpers: RepositoryLayout, TestCabinets
+├── Nemetschek.Archive.Core.Tests/        one test project per production project
+│   ├── Cabinets/    TestCabinets (the fixture in code) + the test that keeps it honest
+│   ├── Domain/      the rules each domain type declares on itself
+│   ├── Documents/   the store, against a temp directory
+│   └── Uploads/     the folder→document rules, and running an upload
+├── Nemetschek.Archive.Infrastructure.Tests/  the loader, path resolution, DI and health
+└── Nemetschek.Archive.Api.Tests/
+    ├── Architecture/  the solution-wide dependency rules, and RepositoryLayout
+    ├── Contracts/     paging arithmetic and every mapping
+    ├── Endpoints/     the real service in process, via WebApplicationFactory
+    └── Middleware/    the one place that picks a status code
 Nemetschek.Export/                       _(planned)_ same shape
 ```
 
-**One test project per production project**, named `<Project>.Tests` and referencing only its subject
-plus `TestSupport`. Shared test helpers go in `TestSupport`, which has no test-framework dependency.
-Both rules are enforced: `Each_test_project_references_the_project_it_tests` and
+**One test project per production project**, named `<Project>.Tests` and referencing only its
+subject. There is no shared test-helper project: `TestSupport` was removed, and a helper now lives
+in the one project that needs it — `TestCabinets` in `Core.Tests`, `RepositoryLayout` in
+`Api.Tests`, and a four-line `RepositoryFixtures` duplicated in the two projects that only need the
+fixture path. Both project rules are enforced:
+`Each_test_project_references_the_project_it_tests` and
 `No_production_project_references_a_test_project`.
+
+A test project may take a package the project it tests does not — `Mvc.Testing` in `Api.Tests`,
+`DependencyInjection` and `Logging` in `Infrastructure.Tests`. Only `Core` has an allowlist.
 
 Project references: `Api → Infrastructure → Core`, and `Api → Core`. **`Core` references no other
 project**, and takes a NuGet package only from the allowlist in
@@ -113,6 +126,14 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
 - **A rule gets a test that names it.** Test method names read as the rule, so a reviewer can map
   test → rule: `Write_to_a_non_writable_field_is_refused`. If you change a rule, the failing test
   should tell you which rule you broke.
+- **A test asserts what the code does, not what it should do.** Where the two differ, the test
+  states the behaviour and the disagreement is recorded in `DECISIONS.md` — a test written against
+  an intention the code does not hold is a test that fails for the wrong reason. The store logging
+  a cancelled upload at `Error` is the live example.
+- **An endpoint is tested through the real service.** `Api.Tests/Endpoints/ArchiveApplication.cs` is
+  a `WebApplicationFactory` over `Program.cs` on a temp storage directory, so the statuses, the
+  error shapes, the page cap and the health endpoints are covered as a caller sees them, with no
+  container and no network. Add an endpoint, add a row there.
 - **`dotnet test` must pass from a clean clone with no network and no containers.** Rule tests run
   against `Core` with hand-written fixtures; nothing in the test project may need a database or Docker.
 - **Validation returns, it does not throw.** `IndexFieldRules` returns a `FieldViolation?` — `null`
@@ -221,7 +242,8 @@ rather than adding a second `.sln`. When the Export service arrives, add its pro
 
 ```bash
 dotnet build          # warnings are errors
-dotnet test           # offline, no containers — 70 tests across three test projects at time of writing
+dotnet test           # offline, no containers — 281 tests across three test projects
+dotnet test --collect:"XPlat Code Coverage"   # 98.9% of lines at time of writing
 docker compose up --build   # the supported way to run it; rebuilds and recreates in one command
 
 # Running from source needs both paths, because neither is defaulted:

@@ -20,7 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Nemetschek.Archive.Core\Nemetschek.Archive.Core.csproj" />
-    <ProjectReference Include="..\Nemetschek.Archive.TestSupport\Nemetschek.Archive.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

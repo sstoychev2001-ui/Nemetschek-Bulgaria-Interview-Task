@@ -1,16 +1,15 @@
 using Nemetschek.Archive.Core.Domain.Cabinets;
-using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Core.Validation.IndexFields;
 
-namespace Nemetschek.Archive.TestSupport;
+namespace Nemetschek.Archive.Core.Tests.Cabinets;
 
 /// <summary>
 /// The two cabinets from fixtures/cabinets.json, built in code.
 /// </summary>
-// Rule tests use these so they do not depend on file IO. The loader is tested separately against the
-// real fixture, and one of its tests compares the loaded fields to these — that comparison is what
-// keeps the two from drifting apart.
+// Rule tests use these so they do not depend on file IO. TestCabinetsTests is what keeps them
+// honest: it reads fixtures/cabinets.json itself and compares, so a fixture change that is not
+// mirrored here fails rather than leaving every rule test passing against the wrong schema.
 public static class TestCabinets
 {
     public static Cabinet Invoices() => new()

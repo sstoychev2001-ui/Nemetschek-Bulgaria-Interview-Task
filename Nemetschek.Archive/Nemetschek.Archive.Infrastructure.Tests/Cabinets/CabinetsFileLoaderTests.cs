@@ -1,7 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using Nemetschek.Archive.Infrastructure.Cabinets;
-using Nemetschek.Archive.TestSupport;
 using Nemetschek.Archive.Core.Domain.Cabinets;
 using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
@@ -17,8 +16,7 @@ namespace Nemetschek.Archive.Infrastructure.Tests.Cabinets;
 /// </summary>
 public sealed class CabinetsFileLoaderTests
 {
-    private static string FixturePath =>
-        RepositoryLayout.Path("fixtures", "cabinets.json");
+    private static string FixturePath => RepositoryFixtures.CabinetsFile;
 
     private static IReadOnlyList<Cabinet> RealCabinets() => CabinetsFileLoader.Load(FixturePath);
 
@@ -59,18 +57,28 @@ public sealed class CabinetsFileLoaderTests
     }
 
     /// <summary>
-    /// This is the test that keeps <see cref="TestCabinets"/> honest. The rule tests use hand-written
-    /// cabinet definitions so they do not depend on file IO; if the fixture and those definitions ever
-    /// drift apart, every rule test would still pass while testing the wrong schema. Comparing the
-    /// loaded fields to the hand-written ones closes that gap.
+    /// The whole fixture, field by field, stated here rather than compared to another copy of it.
     /// </summary>
-    [Fact]
-    public void The_loaded_fields_match_the_hand_written_definitions_used_by_the_rule_tests()
+    // This used to compare against the hand-written cabinets in the TestSupport library, which was
+    // the only thing keeping those and the fixture from drifting apart. TestSupport is gone, and
+    // that guard now lives beside the hand-written copy as Core.Tests' TestCabinetsTests, which
+    // reads this same file. Here the expectation is spelled out instead, so a field added to the
+    // fixture and nowhere else fails on both sides.
+    [Theory]
+    [InlineData("Invoices", "InvoiceNumber|Invoice number|Text|20|True", "Supplier|Supplier|Text|60|True",
+        "Amount|Amount|Number||True", "InvoiceDate|Invoice date|Date||True", "Batch|Batch|Text|100|True",
+        "Status|Status|Text|12|True", "ApprovedBy|Approved by|Text|60|False")]
+    [InlineData("Contracts", "ContractNumber|Contract number|Text|30|True", "Party|Contract party|Text|100|True",
+        "SignedOn|Signed on|Date||True", "Value|Contract value|Number||True", "Notes|Notes|Text|255|True",
+        "Category|Category|Text|40|False")]
+    public void Every_field_loads_exactly_as_the_fixture_declares_it(
+        string cabinetName,
+        params string[] expected)
     {
-        var loaded = RealCabinets();
-
-        Assert.Equal(TestCabinets.Invoices().Fields, Find(loaded, "Invoices").Fields);
-        Assert.Equal(TestCabinets.Contracts().Fields, Find(loaded, "Contracts").Fields);
+        Assert.Equal(
+            expected,
+            Find(RealCabinets(), cabinetName).Fields.Select(field =>
+                $"{field.Name}|{field.Label}|{field.Type}|{field.MaxLength}|{field.Writable}"));
     }
 
     [Fact]

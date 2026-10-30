@@ -1,4 +1,4 @@
-using Nemetschek.Archive.TestSupport;
+using Nemetschek.Archive.Core.Tests.Cabinets;
 using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Core.Validation.IndexFields;

@@ -7,10 +7,11 @@ using Nemetschek.Archive.Core.Services.Documents;
 namespace Nemetschek.Archive.Core.Tests.Documents;
 
 /// <summary>
-/// What the store writes down. Runs against a throwaway directory: no container, no network.
+/// What the store does and what it writes down. Runs against a throwaway directory: no container,
+/// no network.
 /// </summary>
-// The failure test is the one that matters: UploadService catches a store exception and turns it
-// into a Failed row, so if the LogError went missing, a disk that had stopped accepting writes
+// The failure test is the one that matters most: UploadService catches a store exception and turns
+// it into a Failed row, so if the LogError went missing, a disk that had stopped accepting writes
 // would answer 200 and leave nothing in the container log. That is how the behaviour was lost once
 // already — see the UploadFailureStatusMiddleware note in DECISIONS.md.
 public sealed class DocumentsStoreServiceTests : IDisposable
@@ -20,13 +21,17 @@ public sealed class DocumentsStoreServiceTests : IDisposable
 
     private readonly RecordingLogger<DocumentsStoreService> logger = new();
 
+    private readonly FixedClock clock = new(new DateTimeOffset(2026, 3, 1, 9, 30, 0, TimeSpan.Zero));
+
     /// <summary>A store on a prepared, empty storage root.</summary>
     private DocumentsStoreService Store()
     {
         DocumentsStoreService.Prepare(root);
 
-        return new DocumentsStoreService(root, TimeProvider.System, logger);
+        return new DocumentsStoreService(root, clock, logger);
     }
+
+    // --- logging ------------------------------------------------------------------------------
 
     [Fact]
     public async Task A_stored_document_is_logged_with_its_id()
@@ -54,16 +59,301 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task A_cancelled_store_is_not_logged_as_a_failure()
+    public async Task A_cancelled_store_is_logged_at_Error_like_any_other_failure()
     {
-        // A caller going away is not a fault of the Archive's, and logging it at Error would make
-        // an abandoned upload look like a broken volume.
+        // Asserting what the store does, not what it arguably should: the `catch` arm logs every
+        // exception, cancellation included. An upload the caller abandoned therefore appears in the
+        // log as an Error, indistinguishable from a volume that stopped accepting writes.
+        // `UploadService.StoreOneAsync` does filter cancellation, so the report itself is unaffected
+        // — see "What the service logs" in DECISIONS.md.
         var draft = Draft(Part.ToStore("page1.txt", () => throw new OperationCanceledException()));
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => Store().AddAsync(draft, CancellationToken.None));
 
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.IsType<OperationCanceledException>(entry.Exception);
+    }
+
+    [Fact]
+    public async Task Reading_a_page_logs_nothing()
+    {
+        // Reads are accounted for by the per-request HTTP log, so the store stays quiet.
+        await Store().ListAsync("Invoices", skip: 0, take: 10, CancellationToken.None);
+
         Assert.Empty(logger.Entries);
+    }
+
+    // --- storing and reading back --------------------------------------------------------------
+
+    [Fact]
+    public async Task A_stored_document_comes_back_from_disk_as_it_went_in()
+    {
+        var store = Store();
+        await store.AddAsync(Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
+
+        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+
+        var document = Assert.Single(page.Documents);
+        Assert.Equal("invoice-001.txt", document.Title);
+        Assert.Equal("Invoices", document.CabinetName);
+        Assert.Equal(
+            "sample-material",
+            Assert.IsType<IndexValue.Text>(document.IndexValues["Batch"]).Value);
+        var part = Assert.Single(document.Parts);
+        Assert.Equal("page1.txt", part.Name);
+        Assert.Equal(0, part.Order);
+        Assert.Equal(8, part.SizeInBytes);
+    }
+
+    [Fact]
+    public async Task Part_content_is_stored_byte_for_byte()
+    {
+        await Store().AddAsync(Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
+
+        var file = Assert.Single(
+            Directory.EnumerateFiles(root, "*.bin", SearchOption.AllDirectories));
+        Assert.Equal("page one", await File.ReadAllTextAsync(file, TestToken));
+    }
+
+    [Fact]
+    public async Task The_store_sets_the_system_fields_and_ignores_what_arrived()
+    {
+        var arrived = Draft(Part.ToStore("page1.txt", Content)) with
+        {
+            Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            StoredAt = DateTimeOffset.UnixEpoch,
+            ModifiedAt = DateTimeOffset.UnixEpoch,
+        };
+
+        var stored = await Store().AddAsync(arrived, CancellationToken.None);
+
+        Assert.NotEqual(arrived.Id, stored.Id);
+        Assert.Equal(clock.GetUtcNow(), stored.StoredAt);
+        Assert.Equal(clock.GetUtcNow(), stored.ModifiedAt);
+    }
+
+    [Fact]
+    public async Task An_id_carries_the_time_it_was_stored()
+    {
+        // Version 7 GUIDs are built from the timestamp, which is what makes an id sortable.
+        var stored = await Store().AddAsync(
+            Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
+
+        Assert.Equal(7, stored.Id.Version);
+    }
+
+    [Fact]
+    public async Task The_content_callback_is_cleared_once_the_part_is_stored()
+    {
+        var stored = await Store().AddAsync(
+            Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
+
+        Assert.Null(Assert.Single(stored.Parts).OpenContent);
+    }
+
+    [Fact]
+    public async Task A_users_name_never_becomes_a_file_name()
+    {
+        // The brief's rule: user-supplied names are data. Content is addressed by a generated id,
+        // and the name the user chose lives inside document.json as text.
+        var store = Store();
+        var stored = await store.AddAsync(
+            Draft(Part.ToStore("Договор София.txt", Content)), CancellationToken.None);
+
+        var partFile = Assert.Single(
+            Directory.EnumerateFiles(root, "*.bin", SearchOption.AllDirectories));
+        Assert.Contains(
+            Assert.Single(stored.Parts).Id.ToString(),
+            Path.GetFileName(partFile),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Договор", partFile, StringComparison.Ordinal);
+
+        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+        Assert.Equal("Договор София.txt", Assert.Single(page.Documents).Parts[0].Name);
+    }
+
+    [Fact]
+    public async Task A_document_with_no_parts_is_stored()
+    {
+        var store = Store();
+        await store.AddAsync(
+            Document.ToStore("Invoices", "empty-folder", Values(), []), CancellationToken.None);
+
+        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+
+        Assert.Empty(Assert.Single(page.Documents).Parts);
+    }
+
+    [Fact]
+    public async Task A_zero_byte_part_is_stored_with_a_size_of_zero()
+    {
+        var stored = await Store().AddAsync(
+            Draft(Part.ToStore("empty-note.txt", () => new MemoryStream())),
+            CancellationToken.None);
+
+        Assert.Equal(0, Assert.Single(stored.Parts).SizeInBytes);
+    }
+
+    [Fact]
+    public async Task Parts_keep_the_order_they_were_given()
+    {
+        var store = Store();
+        await store.AddAsync(
+            Document.ToStore("Invoices", "delivery", Values(),
+            [
+                Part.ToStore("page1.txt", Content),
+                Part.ToStore("page10.txt", Content),
+                Part.ToStore("page2.txt", Content),
+            ]),
+            CancellationToken.None);
+
+        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+
+        Assert.Equal(
+            ["page1.txt", "page10.txt", "page2.txt"],
+            Assert.Single(page.Documents).Parts.Select(part => part.Name));
+        Assert.Equal([0, 1, 2], Assert.Single(page.Documents).Parts.Select(part => part.Order));
+    }
+
+    [Fact]
+    public async Task Two_documents_with_the_same_title_both_survive()
+    {
+        var store = Store();
+        await store.AddAsync(Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
+        await store.AddAsync(Draft(Part.ToStore("page1.txt", Content)), CancellationToken.None);
+
+        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+
+        Assert.Equal(2, page.Total);
+        Assert.Equal(2, page.Documents.Select(document => document.Id).Distinct().Count());
+    }
+
+    // --- paging -------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Documents_come_back_oldest_first_across_day_boundaries()
+    {
+        var store = Store();
+        foreach (var (day, title) in new[] { (3, "march"), (1, "january"), (2, "february") })
+        {
+            clock.Now = new DateTimeOffset(2026, day, 1, 0, 0, 0, TimeSpan.Zero);
+            await store.AddAsync(
+                Document.ToStore("Invoices", title, Values(), []), CancellationToken.None);
+        }
+
+        var page = await store.ListAsync("Invoices", 0, 10, CancellationToken.None);
+
+        Assert.Equal(
+            ["january", "february", "march"],
+            page.Documents.Select(document => document.Title));
+    }
+
+    [Theory]
+    [InlineData(0, 2, new[] { "a", "b" })]
+    [InlineData(2, 2, new[] { "c", "d" })]
+    [InlineData(4, 2, new[] { "e" })]
+    [InlineData(5, 2, new string[0])]
+    public async Task A_page_holds_the_documents_it_was_asked_for(
+        int skip,
+        int take,
+        string[] expected)
+    {
+        var store = Store();
+        foreach (var title in new[] { "a", "b", "c", "d", "e" })
+        {
+            clock.Now = clock.Now.AddMinutes(1);
+            await store.AddAsync(
+                Document.ToStore("Invoices", title, Values(), []), CancellationToken.None);
+        }
+
+        var page = await store.ListAsync("Invoices", skip, take, CancellationToken.None);
+
+        Assert.Equal(expected, page.Documents.Select(document => document.Title));
+        Assert.Equal(5, page.Total);
+    }
+
+    [Fact]
+    public async Task A_cabinet_with_nothing_in_it_is_an_empty_page()
+    {
+        var page = await Store().ListAsync("Contracts", 0, 10, CancellationToken.None);
+
+        Assert.Empty(page.Documents);
+        Assert.Equal(0, page.Total);
+    }
+
+    [Fact]
+    public async Task Documents_of_one_cabinet_are_not_read_from_another()
+    {
+        var store = Store();
+        await store.AddAsync(
+            Document.ToStore("Invoices", "invoice", Values(), []), CancellationToken.None);
+        await store.AddAsync(
+            Document.ToStore("Contracts", "contract", Values(), []), CancellationToken.None);
+
+        Assert.Equal(
+            "invoice",
+            Assert.Single((await store.ListAsync("Invoices", 0, 10, CancellationToken.None)).Documents).Title);
+        Assert.Equal(
+            "contract",
+            Assert.Single((await store.ListAsync("Contracts", 0, 10, CancellationToken.None)).Documents).Title);
+    }
+
+    // --- untrusted cabinet names ---------------------------------------------------------------
+
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("nested/name")]
+    [InlineData("nested\\name")]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("")]
+    public async Task A_cabinet_name_that_is_not_a_single_directory_name_is_refused(string cabinetName)
+    {
+        // Defence in depth: the catalog has already proved the cabinet exists by the time the store
+        // is called, so this can only fire if something upstream stops checking.
+        var store = Store();
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => store.ListAsync(cabinetName, 0, 10, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => store.AddAsync(
+                Document.ToStore(cabinetName, "title", Values(), []), CancellationToken.None));
+    }
+
+    // --- preparing the storage root ------------------------------------------------------------
+
+    [Fact]
+    public void Prepare_creates_the_directories_the_store_and_the_probe_need()
+    {
+        DocumentsStoreService.Prepare(root);
+
+        Assert.True(Directory.Exists(Path.Combine(root, "cabinets")));
+        Assert.True(Directory.Exists(Path.Combine(root, "tmp")));
+    }
+
+    [Fact]
+    public void Prepare_clears_a_staging_directory_left_by_an_upload_that_died()
+    {
+        DocumentsStoreService.Prepare(root);
+        Directory.CreateDirectory(Path.Combine(root, "tmp", "abandoned"));
+
+        DocumentsStoreService.Prepare(root);
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(root, "tmp")));
+    }
+
+    [Fact]
+    public void Prepare_keeps_the_documents_already_stored()
+    {
+        DocumentsStoreService.Prepare(root);
+        var kept = Path.Combine(root, "cabinets", "Invoices");
+        Directory.CreateDirectory(kept);
+
+        DocumentsStoreService.Prepare(root);
+
+        Assert.True(Directory.Exists(kept));
     }
 
     [Fact]
@@ -78,12 +368,35 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Reading_a_page_logs_nothing()
+    public void A_prepared_root_is_writable()
     {
-        // Reads are accounted for by the per-request HTTP log, so the store stays quiet.
-        await Store().ListAsync("Invoices", skip: 0, take: 10, CancellationToken.None);
+        Assert.True(Store().CanWrite());
+    }
 
-        Assert.Empty(logger.Entries);
+    [Fact]
+    public void A_root_whose_staging_directory_is_gone_is_not_writable()
+    {
+        // This is what makes /health/ready answer 503 on a volume that was never prepared.
+        var store = Store();
+        Directory.Delete(Path.Combine(root, "tmp"), recursive: true);
+
+        Assert.False(store.CanWrite());
+    }
+
+    [Fact]
+    public void The_probe_leaves_nothing_behind()
+    {
+        var store = Store();
+
+        Assert.True(store.CanWrite());
+
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(root, "tmp")));
+    }
+
+    [Fact]
+    public void The_root_is_the_path_the_store_was_given()
+    {
+        Assert.Equal(root, Store().Root);
     }
 
     public void Dispose()
@@ -94,17 +407,29 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         }
     }
 
+    // --- helpers ------------------------------------------------------------------------------
+
+    private static CancellationToken TestToken => CancellationToken.None;
+
     private static Func<Stream> Content =>
         () => new MemoryStream(Encoding.UTF8.GetBytes("page one"));
 
-    private static Document Draft(Part part) => Document.ToStore(
-        "Invoices",
-        "invoice-001.txt",
+    private static IReadOnlyDictionary<string, IndexValue> Values() =>
         new Dictionary<string, IndexValue>(StringComparer.OrdinalIgnoreCase)
         {
             ["Batch"] = new IndexValue.Text("sample-material"),
-        },
-        [part]);
+        };
+
+    private static Document Draft(Part part) =>
+        Document.ToStore("Invoices", "invoice-001.txt", Values(), [part]);
+
+    /// <summary>A clock the test moves on purpose, so ordering and paging are not timing-dependent.</summary>
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
 
     /// <summary>An <see cref="ILogger{T}"/> that keeps every entry written to it.</summary>
     private sealed class RecordingLogger<T> : ILogger<T>

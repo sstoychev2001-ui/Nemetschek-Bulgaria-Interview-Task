@@ -91,6 +91,47 @@ Each decision in the form "A, because B". Updated as the work progresses.
 - **Violation reasons are complete user-facing sentences naming the field and the limit, because** the
   client is forbidden from restating server rules, so the server must phrase them.
 
+## Tests
+
+- **`TestSupport` was removed and its two helpers moved into the projects that use them, because**
+  a shared project for ~160 lines made every test project reference a third one, and the enforced
+  convention "a test project references only its subject" had to carve out an exception for it.
+  Asked for on 2026-10-30. `TestCabinets` went to `Core.Tests`, which holds the 25 rule tests that
+  use it; `RepositoryLayout` went to `Api.Tests`, whose architecture tests are the only thing that
+  reads csproj files.
+
+  **The real cost, and how it was paid.** The loader test
+  `The_loaded_fields_match_the_hand_written_definitions_used_by_the_rule_tests` was the only thing
+  keeping `TestCabinets` and `fixtures/cabinets.json` from drifting apart — and it could not survive
+  the split, because it needed the loader from `Infrastructure` and the hand-written cabinets from
+  what is now `Core.Tests`. Dropping it would have left every rule test able to pass against a
+  schema the service never loads. So the guard was rebuilt on both sides instead:
+  `Core.Tests/Cabinets/TestCabinetsTests` parses the fixture itself with `System.Text.Json` and
+  compares field for field, and `Infrastructure.Tests` now spells the fixture's full contents out in
+  a `[Theory]` rather than comparing one copy to another. Two tests where there was one, neither
+  needing a shared project. The duplication that remains is a four-line `RepositoryFixtures`
+  (find the solution file, join `fixtures/cabinets.json`) in two test projects, which is cheaper
+  than the project it replaced.
+- **The upload rules are tested against `UploadPlanningService` directly, because** it takes no
+  ports, reads no content and touches no clock — so one test per rule in the brief is a plain
+  assertion on a returned list, named as the rule. 32 of them. `UploadService` is tested separately
+  with a fake store, which is the only way to assert the brief's "a partial failure is never
+  silent": the fake is told which title to fail, and the test checks the other documents still
+  stored and the failed row carrying its reason.
+- **The endpoints are tested through `WebApplicationFactory` over the real `Program.cs`, because**
+  the statuses, the two error shapes, the page cap and the health endpoints are properties of the
+  whole pipeline, and they had been verified only by hand against a container for several sessions.
+  It needs no container and no network — the inputs are the repository's own `fixtures/cabinets.json`
+  and a temp directory — so `dotnet test` still satisfies the brief's offline requirement. It also
+  took `Api` coverage from 56% to 99%, because `Program.cs` and the controller are only reachable by
+  booting the app.
+- **Coverage is measured, not assumed:** `dotnet test --collect:"XPlat Code Coverage"`, 98.9% of
+  lines (Api 99.4%, Core 98.6%, Infrastructure 100%). Worth knowing when reading those numbers: the
+  three runs each report a different line set for `Core`, so a naive merge of the Cobertura files
+  understates it badly — the figure above is the union of covered lines per source file, and a
+  single-run reading of `Core` alone says 92% only because the `Cabinet` and `IndexField` validation
+  paths are exercised from `Infrastructure.Tests`.
+
 ## Loading the cabinet definitions
 
 - **cabinets.json is read once at startup and held in memory, because** the brief says the cabinets are
@@ -223,9 +264,17 @@ container produced was the fact that it had started.
   reads in one place. The alternative considered was moving the store out to `Infrastructure`
   instead, which was refused because it would reverse "storing is what a document archive does" and
   split one decision across two projects again.
-- **`OperationCanceledException` is not logged as a failure, because** a caller going away is not a
-  fault of the Archive's, and logging it at `Error` would make an abandoned upload look like a
-  broken volume.
+- ~~**`OperationCanceledException` is not logged as a failure, because** a caller going away is not
+  a fault of the Archive's, and logging it at `Error` would make an abandoned upload look like a
+  broken volume.~~ **Not what the code does.** The `catch` arm in `DocumentsStoreService.AddAsync`
+  logs every exception, cancellation included, so an upload the caller abandoned appears in the log
+  as an `Error` indistinguishable from an unwritable volume. The guard was written three times and
+  removed three times; on 2026-10-30 the instruction was to make the tests reflect the code without
+  touching it, so `A_cancelled_store_is_logged_at_Error_like_any_other_failure` now states the real
+  behaviour and this entry is corrected rather than the code. The *report* is unaffected either way
+  — `UploadService.StoreOneAsync` still filters cancellation, which is tested
+  (`Cancellation_is_not_turned_into_a_failed_row`). Reinstating the guard is one `if` and a one-line
+  change to that test.
 - **The store is registered from the container rather than constructed eagerly, because** it now
   holds an `ILogger` and there is no provider to resolve one from at registration time. Both
   registrations resolve the same singleton — `IDocumentStore` for the rules, the concrete type for
@@ -753,10 +802,17 @@ extension; per-document commit with a report.
 
 ## Open debt
 
-- **Test writing is paused** (2026-10-28, at request). The existing tests are kept and passing, but
-  new code from here lands untested until this is lifted. The brief makes "every upload and export rule
-  has a test that fails when that rule is broken" an acceptance criterion and gates `dotnet test` from a
-  clean clone, so this has to be repaid before hand-in. Recorded here rather than left implicit.
+- ~~**Test writing is paused** (2026-10-28, at request).~~ **Lifted on 2026-10-30**, and the debt is
+  repaid: 281 tests, 98.9% of lines. The folder→document upload rules, the refusals, the report, the
+  store, the mappings, the paging arithmetic, the status middleware and both endpoints are covered;
+  `dotnet test` still runs offline with no containers.
+
+  What is left uncovered is seven lines, and each is deliberate: the `Discard` catch arm that
+  swallows a failed cleanup (no portable way to make a delete fail), the two `_ => throw` arms that
+  cannot be reached while every `FieldType` and every `IndexValue` case is handled, and
+  `UploadEntry.Failed`, which has **no caller at all** — `UploadService` builds a failed row with
+  `planned with { … }` instead. That factory is dead code; it was left in place because the
+  instruction for that session was to change tests only.
 
   **One exception was taken on 2026-10-29, and is flagged rather than assumed:** the store's logging
   tests shipped with the logging fix — four as `LoggingDocumentStoreTests`, then five as
@@ -765,18 +821,21 @@ extension; per-document commit with a report.
   deleted by a refactor — see the `UploadFailureStatusMiddleware` note under "AI notes" — so
   shipping it untested would have repeated the exact failure it fixes. Deleting those four tests is
   a one-file change if the pause was meant to cover this too.
-- **The debt was re-measured on 2026-10-30 and is unchanged in substance**: of 70 tests, 9 are
-  architecture, 31 the `cabinets.json` loader, 25 the index-field rules and 5 the store's logging.
-  `UploadPlanningService` and `UploadService` have none, so the folder→document rules — the brief's
-  priority 1 — are still carried by hand verification alone.
-- **The debt now has a shape.** Every upload rule shipped on 2026-10-29 is uncovered:
+- ~~**The debt was re-measured on 2026-10-30**: of 70 tests, 9 are architecture, 31 the
+  `cabinets.json` loader, 25 the index-field rules and 5 the store's logging.
+  `UploadPlanningService` and `UploadService` have none.~~ **Closed later the same day** — the split
+  is now 143 in `Core.Tests`, 84 in `Api.Tests` and 54 in `Infrastructure.Tests`, with the
+  folder→document rules covered rule by rule.
+- ~~**The debt now has a shape.** Every upload rule shipped on 2026-10-29 is uncovered:
   top-level file → one document; top-level folder → parts are its direct files; natural part order;
   nested entries skipped **and** reported; empty folder → document with zero parts; zero-byte file →
   one empty part; the chosen field set on every document; traversal and rooted paths refused;
   Unicode names unchanged; two uploads of the same folder both surviving; per-document failure
   reported and the rest still attempted. The checklist in `docs/upload-requirements.md` §5 is the
   list to work through. All of it was verified by hand instead (see "How to verify a change" in
-  `AGENTS.md`), which is not the same thing and does not satisfy the acceptance criterion.
+  `AGENTS.md`), which is not the same thing and does not satisfy the acceptance criterion.~~
+  **Every item on that list now has a test**, in `Core.Tests/Uploads/` and
+  `Api.Tests/Endpoints/UploadEndpointTests.cs`.
 - **The verified container evidence is from a VM that no longer exists** (2026-10-29). Podman was
   removed and reinstalled during the compose detour, so the machine, images and volumes are new and
   the original twelve-document round trip cannot be pointed at any more. `compose up --build` and the
@@ -812,7 +871,7 @@ extension; per-document commit with a report.
   is an acceptance criterion, so **the next commit must include
   `Core/Domain/IndexFields/Validation/DateValueValidator.cs`** or the hand-in fails it on checkout.
   It also means the "70 tests" figure in the earlier documents was never true of a clean clone — the
-  real number is 65.
+  real number was 65 at that point, and is 281 now.
 
 ## What is built, what is missing
 
@@ -821,7 +880,8 @@ extension; per-document commit with a report.
 the enforced dependency rules, the `cabinets.json` loader with its validation and fail-fast startup,
 a runnable Api with OpenAPI, SwaggerUI and `/health`, and **the upload endpoint end to end** — the
 folder-to-document mapping, ordinal part ordering, untrusted-path handling, per-document commit and
-the one-row-per-entry report. 70 passing tests across three test projects.
+the one-row-per-entry report. 281 passing tests across three test projects, covering 98.9% of
+lines.
 
 Also built: **durable storage** — documents are directories of files on a mounted volume, committed
 by one atomic rename, with `tmp/` swept at startup — `GET /cabinets/{name}/documents`, a paged read
@@ -830,11 +890,12 @@ capped by `Archive:MaxPageSize`, **the containers** (`compose up --build`, data 
 refusal, with a storage failure at `Error`).
 
 **Missing.** Reviewed in full on 2026-10-30; the Archive is **not** feature-complete even leaving
-the Export service and the client aside. In the order the brief's priorities imply:
+the Export service and the client aside. The test gap that headed this list was closed later the
+same day — 281 tests at 98.9% of lines, including the folder→document rules — so what remains is
+functionality:
 
 | Gap | Brief | Note |
 |---|---|---|
-| **Tests for the folder→document upload rules** | Priority 1, and an acceptance criterion | `UploadPlanningService` has no test at all. The 25 index-field tests cover type / `maxLength` / `writable`; nothing covers "each top-level entry is one document", "a file becomes one part", "a subfolder's parts are its direct files", "deeper is skipped *and reported*", "an empty subfolder becomes a document with no parts", the title, the chosen field on every document, or part order. Verified by hand only — see "Open debt" |
 | **Read a part's content over HTTP** | "fetches their content", and the Export never touches the Archive's storage | No endpoint exists; `PartResponse` carries `Id` / `Name` / `Order` / `SizeInBytes` and no content or link. **Blocks the Export service and the client's download.** Would be `GET /cabinets/{cabinet}/documents/{id}/parts/{partId}/content`, streamed from the part file with its `SizeInBytes` as `Content-Length` |
 | **Update index values** | "updates of index values"; "writes the export marker back through the Archive" | No endpoint. **Blocks the export marker.** Would be a `PATCH` of named values through `IndexFieldRules.ValidateWrite`, setting `ModifiedAt`, rewriting `document.json` by the same staging-and-rename route `AddAsync` uses |
 | **Date-range filter on the query** | "queries with a date range and paging"; the filter is on `StoredAt`, inclusive calendar dates as the user means them | Paging exists, the filter does not. This is also where the whole time-zone requirement lands: the day directories make the pruning cheap, but nothing yet converts a user's calendar date to a UTC instant |
@@ -993,3 +1054,4 @@ Rough, as the brief asks for. Durations are approximate and grouped per working 
 | 2026-10-29 | ~0.2 h | Answered why `Prepare` is needed when the Dockerfile already does `mkdir -p /var/lib/archive`: the image layer holds an empty directory (shown with `podman run --entrypoint ls`), a volume replaces that path at runtime, `tmp/` is what the readiness probe writes into — deleting it from the running container gives `503` until a restart — and running from source has no Dockerfile at all. Also demonstrated the sweep: a planted `tmp/abandoned-upload` is gone after a restart. Written into `DECISIONS.md` and `AGENTS.md`; no code change |
 | 2026-10-30 | ~0.3 h | Audited the brief against the code to answer "are we done apart from Export and the UI". Answer: no — the Archive is missing a part-content endpoint, index-value updates, the date-range filter and `GET /cabinets`, has no CORS policy, and still has zero tests over the folder→document upload rules (the brief's priority 1). The first two block the Export service, so they precede it. Counted the suite by class to get the coverage claim right (9 architecture + 31 loader + 25 field rules + 5 store), and rewrote "What is built, what is missing" as a table with how each gap would be done. No code change |
 | 2026-10-30 | ~0.2 h | Fixed a broken build: `DocumentPage` and `FieldViolation` were absent from the working tree, so eleven files in `Core` would not compile. Traced it to the merge at `HEAD` (`6f0ae8f`), which took the deleting side of `660a26b` — a 28-file, 843-deletion commit from `origin/main`. Restored both from `d1fc81b`, then checked every other path that commit deleted: all of them are old locations the Core restructure superseded (`Ports/` → `Services/Interfaces/`, `Domain/IndexFields/` → `Validation/IndexFields/`, the deliberately merged `*Draft` types), each with a live counterpart. The cancellation guard in `AddAsync` had also gone missing for the second time and was restored again, which is what the suite caught |
+| 2026-10-30 | ~1.4 h | Removed the `TestSupport` project and raised coverage from 70 tests to 281 (98.9% of lines; Api 99.4%, Core 98.6%, Infrastructure 100%). `TestCabinets` moved to `Core.Tests` and `RepositoryLayout` to `Api.Tests`; the fixture-drift guard that the split would have destroyed was rebuilt on both sides. New: 32 tests for the folder→document upload rules (the brief's priority 1, previously uncovered), 23 for `UploadService` including the partial-failure rule, 25 more for the store (round trip, paging, system fields, untrusted cabinet names, `Prepare`, `CanWrite`), the catalog, the domain validation rules, every mapping, the paging arithmetic, the status middleware, and 27 endpoint tests that boot the real service with `WebApplicationFactory`. No production code was touched, per the instruction: where a test and the code disagreed — the store logging a cancelled upload at `Error` — the test now states the behaviour and `DECISIONS.md` is corrected instead. Found `UploadEntry.Failed` to be dead code and left it, flagged |
