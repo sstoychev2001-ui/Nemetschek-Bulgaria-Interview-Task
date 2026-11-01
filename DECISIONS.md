@@ -785,6 +785,57 @@ container produced was the fact that it had started.
   the same URLs. `ArchiveApplication` still names `CabinetsController` as the
   `WebApplicationFactory` entry-point type, which only needs to be a type in the Api assembly.
 
+- **CORS is configured per service from one comma-separated setting, and an unset setting means
+  any origin, because** the brief says the client may be served from another host but does not say
+  which, and no credential exists to protect: there is no authentication, no cookie and no session,
+  so a hostile page that calls these services learns only what an unauthenticated caller could fetch
+  with `curl` anyway. Refusing every origin by default would mean the client cannot work until
+  someone finds the setting, and the usual middle ground — hard-coding `http://localhost:5173` —
+  bakes one developer's dev server into the image the brief requires to run anywhere. Narrowing it
+  is `Archive__AllowedOrigins=https://client.example`, one variable, no rebuild.
+
+  **What this costs, stated because it is a real trade:** with any origin allowed, any page in any
+  browser can read this Archive and start exports. That is acceptable for a take-home demo over
+  `localhost` and would not be past it: the moment authentication exists, `AllowAnyOrigin` has to
+  become an allowlist, and ASP.NET will not even let it stay — a policy cannot combine
+  `AllowAnyOrigin` with `AllowCredentials`, which is the framework enforcing this exact boundary.
+- **`app.UseCors()` runs before `UseExceptionHandler` and the exception middleware, because** a
+  cross-origin caller can only read a response body the CORS headers permit it to read. Put the
+  other way round, a `404` or a `400` would reach the browser stripped, and the client — which the
+  brief requires to show the server's message — would have nothing to show but a network error. This
+  is covered rather than asserted: `A_refusal_carries_the_header_too_so_the_client_can_show_the_message`
+  on both services makes a refusing request with an `Origin` and checks both the header and the
+  `ProblemDetails` title.
+- **The Export exposes `Content-Disposition`, because** an export is a download and the file name is
+  part of the answer. A cross-origin client cannot read an unexposed response header, so without
+  this it would have to build the name itself from the cabinet and the dates — the zip's naming rule
+  restated in the client, which is the duplication the brief forbids.
+
+- **Every setting appears in `appsettings.json` as a placeholder — blank for the required ones, the
+  real default for the tunables — and the live defaults sit in `appsettings.Development.json`,
+  because** the two questions "what does this service read?" and "what will it run with?" deserve
+  different answers in different files. The placeholder file is the contract: open it and the full
+  set is visible with its types, with no prose to go stale. The Development file is the convenience:
+  `dotnet run` and F5 start both services with nothing supplied, because the launch profiles set
+  `ASPNETCORE_ENVIRONMENT=Development`.
+
+  Putting the defaults in `appsettings.json` instead would have been simpler and was rejected: that
+  file is what the *container* reads, and a real `StoragePath` there is exactly the failure the
+  setting exists to prevent — a deployment that forgets it would store documents in the container's
+  writable layer and lose them on the next restart, quietly. Development-only defaults keep that
+  protection whole: verified both ways, the service starting from source with no variables set, and
+  `ASPNETCORE_ENVIRONMENT=Production` failing with `Setting 'Archive:CabinetsFile' is required`.
+- **A blank required setting is treated as missing, because** the placeholder made blank the normal
+  shape of "not supplied", and `?? throw` only catches an absent key. Without the change the error
+  degraded from `InvalidOperationException: Setting 'Archive:StoragePath' is required` to an
+  `ArgumentException` about an empty string thrown from inside a DI extension, which no longer names
+  the setting a reader has to go and set. `RequiredSettingTests` on both services pins the message
+  for `""` and for whitespace.
+- **The Export's Development default is `http://localhost:5287`, not the container's `:8080`,
+  because** it is the Archive's own launch-profile address, so the pair works from source with
+  nothing supplied. Compose overrides it with the service name, which is the only place `:8080` is
+  right.
+
 ## Storage
 
 - **Documents are files on a mounted volume, one directory each, with no database, because** every
@@ -1170,7 +1221,6 @@ refusal, with a storage failure at `Error`).
 
 | Gap | Brief | Note |
 |---|---|---|
-| **CORS** | "The client may be served from a different host than the services" | No policy configured, on either service |
 | **The web client** | Priority 4 | Not started. Both services have browsable OpenAPI, which the brief accepts as the fallback demo |
 
 Everything else the brief asks of the two services is built. The export rules that were listed as
@@ -1191,7 +1241,7 @@ Against "Things your system must cope with":
 | Configurable maximum page size | Addressed — `Archive:MaxPageSize`, default 50, enforced on every read and the cap the Export pages against. The date-range filter it is combined with is built and tested |
 | Time zones | **Not addressed, on purpose** — the time-zone parameter was removed on 2026-10-30 because the client and the services share a zone for the demo. Dates are UTC calendar days and the marker carries the UTC date, so a caller in another zone sees UTC's day boundaries. The measurement of what that costs, and how to reinstate it, are under "Removed: the time zone parameter" |
 | Services may start in any order | Addressed in the service, not in compose — an export attempted while the Archive is away returns `502` naming it unreachable, and the next one succeeds without a restart. The `service_healthy` gate that used to hold the Export back was removed with the health checks on 2026-10-31 |
-| Different hosts for client and services | Not addressed — no CORS policy yet |
+| Different hosts for client and services | Addressed — a CORS policy on both services, from `Archive:AllowedOrigins` / `Export:AllowedOrigins`, empty meaning any origin. `UseCors` runs before the error shapes so a refusal is readable cross-origin, and the Export exposes `Content-Disposition` for the download's name |
 | The logs of every service are visible | Addressed for both — see "What the service logs". `compose logs` shows startup, one line per request, one per stored document, and refusals |
 | Failures reach callers in one documented shape | Partly — a rule refusal and an unknown cabinet are `ProblemDetails` from `ArchiveExceptionMiddleware`, but a missing form field is ASP.NET's own `ValidationProblemDetails`. Two shapes, both documented in `README.md`; reconciling them is open |
 | Fields have types and limits | Addressed — `IndexFieldRules`, enforced on the upload path |
@@ -1312,7 +1362,7 @@ Where the AI was wrong, and how it was caught.
 
 ## Time log
 
-Rough, as the brief asks for, and grouped per session rather than per prompt. ~30.0 h in total.
+Rough, as the brief asks for, and grouped per session rather than per prompt. ~31.0 h in total.
 
 | Date | Time | What |
 |---|---|---|
@@ -1340,3 +1390,5 @@ Rough, as the brief asks for, and grouped per session rather than per prompt. ~3
 | 2026-10-31 | ~0.2 h | Fixed `ArchiveHttpClient.ReadDocumentsAsync`, which was asking for one page past the end: the loop tested `read < page.Total` only after fetching, so the condition was judged against a page already requested. It now breaks on `read >= page.Total` after yielding, keeping `Documents.Count > 0` for a total the Archive cannot deliver. Found by running the whole suite rather than the project being worked on — two Export tests had turned red mid-session. 422 tests, 0 warnings |
 | 2026-10-31 | ~0.4 h | Removed health checking from both services on instruction: the two endpoints each, the three checks behind them, the compose `healthcheck` blocks, the `service_healthy` gate, and the `apt-get` layer that existed only to put `curl` in the runtime images for it. `DocumentStorageRoot.CanWrite` went too — the storage probe was its only caller. 11 tests removed with the behaviour they pinned; 411 remain, 0 warnings. Recorded what the gating bought, since the brief's "services may start in any order" is now answered by the Export's `502` alone. |
 | 2026-11-01 | ~0.6 h | Built `GET /cabinets`, the last Archive gap: every cabinet with its fields, each answering `type`, `maxLength`, `writable` and `choosable`. `choosable` exists so a client's upload-field and marker-field pickers do not restate "writable and text" — `Cabinet.WritableTextFields` put on the wire. Then split the five-action `CabinetsController` into one controller per entity, routes unchanged; the existing endpoint tests passing against the same URLs is the proof. 23 new tests (mapping and endpoint), and a mutation that makes every field choosable fails 7 of them. 434 tests, 0 warnings |
+| 2026-11-01 | ~0.5 h | CORS on both services, closing the last non-client gap: one comma-separated `AllowedOrigins` setting each, empty meaning any origin, `UseCors` placed before the error shapes so a refusal stays readable cross-origin, and `Content-Disposition` exposed on the Export so the download's name is not restated in the client. 10 endpoint tests; removing `app.UseCors()` fails 4 of 5 per service. Caught that exact removal for real: a cleanup pass stripped the call along with its comment, which would have left `AddCors` registered and never applied. 444 tests, 0 warnings |
+| 2026-11-01 | ~0.5 h | Made both services runnable from source with nothing supplied: every setting now appears in `appsettings.json` as a typed placeholder, and the live values sit in `appsettings.Development.json`, which keeps the container's fail-fast protection intact. A blank required setting is now treated as missing, or the placeholder would have degraded the error from one naming the setting to an `ArgumentException` about an empty string; `RequiredSettingTests` pins the message on both services. Verified by running the pair and calling `GET /cabinets`, and by confirming Production still refuses to start. Also fixed `RepositoryLayout`, whose csproj scan counted a git worktree's copy of every project and threw in its static initializer. 450 tests, 0 warnings |

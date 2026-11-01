@@ -26,6 +26,7 @@ Nemetschek.Archive/
 │   ├── Controllers/  one per entity: Cabinets, Uploads, Documents — actions only, no helpers
 │   ├── Contracts/    one folder per entity with Requests/, Responses/, Mappings/, plus Shared/
 │   └── Middleware/   ArchiveExceptionMiddleware — the only status-code decision
+│       Program.cs    settings, the CORS policy, and the pipeline order the two depend on
 ├── Nemetschek.Archive.Core/             the Archive itself — abstractions-only packages, allowlisted
 │   │   every root folder is split again by entity: Cabinets, Documents, IndexFields, Uploads
 │   ├── Domain/       the entities only — Cabinet, IndexField, IndexValue, Document, Part, …
@@ -117,6 +118,7 @@ rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` 
 | Whether a request is refused before anything is stored | `UploadService.Refuse` throws `UploadRefusedException`; a missing cabinet throws `UnknownCabinetException`. A refusal is terminal and there is only ever one of them, which is why it throws where a per-entry refusal stays a value in the report |
 | Running an upload: validate, store per document, report | `Core/Domain/Uploads/UploadService.cs` |
 | Upload size and part-count limits | `Program.cs`, from `Archive:MaxUploadBytes` and `Archive:MaxUploadEntries` |
+| Whether a browser client on another host may call | The CORS policy in each `Program.cs`, from `Archive:AllowedOrigins` / `Export:AllowedOrigins` — comma-separated, and **empty means any origin**. `app.UseCors()` sits *before* the exception middleware in both, so a refusal carries the headers too; without that a browser withholds the error body and the client cannot show the server's message. The Export also exposes `Content-Disposition` so a client can read the zip's name rather than restate it |
 | Which HTTP status a refusal answers with | `Api/Middleware/ArchiveExceptionMiddleware.cs` — a `switch` over the expected exception types, one arm each. `UnknownCabinetException` → `404`, `UploadRefusedException` → `400`, anything else rethrown for `UseExceptionHandler` → `500`. A new expected refusal is one more arm |
 | Zip layout (file / folder / empty folder per document) | `Export.Core/Services/Exports/ExportService.WriteDocumentAsync`. See "The Export service" in `DECISIONS.md` |
 | Duplicate-title naming (` (2)`, ` (3)`, before the extension) | `ExportService.GetEntryName` — the only place. It takes the table of names already used, so the same call names documents across the archive and parts inside one folder-document, each with its own table |
@@ -309,7 +311,7 @@ a moment before the first export.
 
 ```bash
 dotnet build          # warnings are errors
-dotnet test           # offline, no containers — 434 tests across six test projects
+dotnet test           # offline, no containers — 444 tests across six test projects
 docker compose up --build -d          # both services; give the Archive a moment before exporting
 
 # Running from source needs both paths, because neither is defaulted:

@@ -20,6 +20,7 @@ public static class RepositoryLayout
     /// <summary>Every project file in the repository, keyed by project name.</summary>
     public static IReadOnlyDictionary<string, string> ProjectFiles { get; } =
         Directory.EnumerateFiles(Root.FullName, "*.csproj", SearchOption.AllDirectories)
+            .Where(IsInRepository)
             .ToDictionary(
                 p => System.IO.Path.GetFileNameWithoutExtension(p),
                 p => p,
@@ -42,6 +43,18 @@ public static class RepositoryLayout
     /// <summary>The names of the projects that are not test projects.</summary>
     public static IEnumerable<string> ProductionProjects =>
         ProjectFiles.Keys.Where(name => !name.EndsWith(".Tests", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Whether a path is one of the repository's own files. A git worktree under
+    /// <c>.claude/worktrees/</c> holds a second copy of every project, and build output holds more;
+    /// counting either would make the project names ambiguous.
+    /// </summary>
+    private static bool IsInRepository(string path) =>
+        !System.IO.Path.GetRelativePath(Root.FullName, path)
+            .Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)
+            .Any(segment =>
+                segment.StartsWith('.') ||
+                segment is "bin" or "obj");
 
     private static IEnumerable<string> ItemsOf(string projectName, string itemName)
     {

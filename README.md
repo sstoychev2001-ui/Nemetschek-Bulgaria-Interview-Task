@@ -140,22 +140,38 @@ Tests need no containers and run straight from the repository. Requires the .NET
 
 ```bash
 dotnet build                        # warnings are errors
-dotnet test                         # offline, no containers — 389 tests
-dotnet test --collect:"XPlat Code Coverage"   # 98.9% of lines
+dotnet test                         # offline, no containers — 450 tests
+dotnet test --collect:"XPlat Code Coverage"
 ```
 
 The endpoint tests boot the real service in process with `WebApplicationFactory`, on a throwaway
-storage directory and the repository's own `fixtures/cabinets.json` — so `dotnet test` covers the
-two routes, their statuses and the page cap without a container or a network.
+storage directory and the repository's own `fixtures/cabinets.json` — so `dotnet test` covers
+every route, its statuses and the page cap without a container or a network.
 
-`dotnet run` deliberately has no built-in configuration: both paths below are required and have no
-defaults, so running from source means supplying them. This is so a missing setting can never
-resolve to a path inside the image and lose data silently.
+## Running from source
+
+Both services run with nothing supplied. Each `appsettings.json` lists every setting it reads with a
+placeholder showing the type, and `appsettings.Development.json` fills in the two paths and the
+Archive's address — which is why the launch profiles, which set `ASPNETCORE_ENVIRONMENT=Development`,
+need no environment variables:
 
 ```bash
-Archive__CabinetsFile=$PWD/fixtures/cabinets.json \
-Archive__StoragePath=$PWD/.archive-data \
-  dotnet run --project Nemetschek.Archive/Nemetschek.Archive.Api --no-launch-profile
+dotnet run --project Nemetschek.Archive/Nemetschek.Archive.Api   # http://localhost:5287
+dotnet run --project Nemetschek.Export/Nemetschek.Export.Api     # http://localhost:5288
+```
+
+The Archive reads `fixtures/cabinets.json` and stores documents in `.archive-data/` at the
+repository root, which is git-ignored; the Export reaches the Archive at `http://localhost:5287`.
+Delete `.archive-data/` to start from an empty archive.
+
+**The defaults are Development-only on purpose.** In Production — which is what the containers run —
+the required settings are blank, and a blank one is treated as missing, so startup fails naming it
+rather than resolving to a path inside the image and losing data silently:
+
+```bash
+ASPNETCORE_ENVIRONMENT=Production dotnet run --no-launch-profile \
+  --project Nemetschek.Archive/Nemetschek.Archive.Api
+# Unhandled exception. System.InvalidOperationException: Setting 'Archive:CabinetsFile' is required
 ```
 
 **The Archive**, on `http://localhost:8080`:
@@ -394,6 +410,11 @@ in the volume today are from an upload after that reinstall, not the original tw
 
 ## Settings that have to be supplied
 
+Every setting each service reads is listed in its own `appsettings.json`, with a placeholder showing
+the type: a blank string for the ones that must be supplied, and the real default for the tunables.
+**A blank required setting is treated as missing**, so startup fails naming it rather than guessing.
+`appsettings.Development.json` fills the blanks in for running from source — see above.
+
 | Setting | Service | Purpose |
 |---|---|---|
 | `Archive:CabinetsFile` | Archive | **Required.** Path to `cabinets.json`. Absolute, or relative to the service's content root. The service refuses to start without it, and refuses to start if the file is missing or unusable. |
@@ -401,7 +422,9 @@ in the volume today are from an upload after that reinstall, not the original tw
 | `Archive:MaxUploadBytes` | Archive | Largest upload body accepted, in bytes. Default 268435456 (256 MiB). |
 | `Archive:MaxUploadEntries` | Archive | Most parts accepted in one multipart body. Default 10000. |
 | `Archive:MaxPageSize` | Archive | Most documents one page may hold. Default 50; the review demo runs with 5. |
-| `Export:ArchiveBaseAddress` | Export | **Required.** The Archive's HTTP base address, such as `http://archive-api:8080`. The service refuses to start without it, and refuses an address that is not absolute. There is no default on purpose: the Export reaches the Archive over HTTP and nothing else, so a wrong or missing address has to fail at startup rather than at the first export. |
+| `Archive:AllowedOrigins` | Archive | Origins a browser client may call from, comma-separated — `http://localhost:5173,https://client.example`. **Unset means any origin**, which is what the demo wants: nothing here is authenticated and no cookie is read, so there is no credential for a hostile page to borrow. Set it to pin the client's host. |
+| `Export:AllowedOrigins` | Export | The same, for the Export service. It also exposes `Content-Disposition`, so a cross-origin client can read the zip's file name off the response instead of inventing one. |
+| `Export:ArchiveBaseAddress` | Export | **Required.** The Archive's HTTP base address, such as `http://archive-api:8080`. The service refuses to start without it, and refuses an address that is not absolute. There is no Production default on purpose: the Export reaches the Archive over HTTP and nothing else, so a wrong or missing address has to fail at startup rather than at the first export. |
 
 Every setting can be supplied as an environment variable using ASP.NET Core's double-underscore form,
 so the same image runs with different settings:
