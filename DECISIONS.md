@@ -922,18 +922,49 @@ container produced was the fact that it had started.
   cache that can be stale. It is the opposite choice from the cabinet catalog, deliberately: that
   one is fixed, tiny and never changes, and documents are none of those things.
 
-- **The service is run as a container only, and `appsettings.Development.json` carries no `Archive`
-  section, because** a relative default there resolves against the content root — `/app` inside the
-  image — so a deployment that forgot to mount the volume would quietly store documents in the
-  container's own writable layer and lose them at the next restart. Required-and-absent fails at
-  startup naming the setting, which is the louder and more useful failure. The cost is that
-  `dotnet run` now needs both paths supplied; the command is in `README.md`.
+- **The two Archive paths have no usable default outside Development, because** a relative default
+  reaching a container resolves against the content root — `/app` inside the image — so a deployment
+  that forgot to mount the volume would quietly store documents in the container's own writable
+  layer and lose them at the next restart. Required-and-unset fails at startup naming the setting,
+  which is the louder and more useful failure.
+
+  **This narrows an earlier decision**, which held that `appsettings.Development.json` carry no
+  `Archive` section at all so that `dotnet run` had to be given both paths. It now defaults them to
+  repository-relative locations (`../../fixtures/cabinets.json`, `../../.archive-data`), because the
+  containers run as `Production` and never read that file — so the guarantee above is kept by the
+  environment, not by leaving a developer convenience out.
 - **`Archive:MaxPageSize`, `MaxUploadBytes` and `MaxUploadEntries` are compose environment
   variables fed from `.env`, because** the brief requires the maximum page size to be configurable
   and the review demo runs with it set to 5 — which is now a one-line edit in `.env` rather than a
   rebuild. Verified by starting the published service with exactly the variables compose sets and
   confirming a request for 100 documents came back capped at 5; a typo in a variable name would
   otherwise fall back to the default in silence.
+- **`appsettings.json` lists every setting as a typed placeholder and carries no `"//…"` comment
+  keys, because** the prose had grown to four comment keys longer than the settings they described,
+  and all of it was already in the settings table in `README.md` — two copies of the same rule, one
+  of which no reader diffs against a deployment. What a reviewer needs from the file is the *shape*:
+  which keys exist and what type each wants. The required ones are therefore present as `""` rather
+  than absent, so the full set is visible in one place, which is what the comment block was for.
+- **An empty required setting is treated as unset, because** the placeholders above would otherwise
+  weaken the startup refusal: `Configuration["Archive:StoragePath"] ?? throw` sees `""` as a
+  supplied value, so the `??` never fires. Both services now read required settings through a
+  `RequiredSetting` local function that rejects null, empty and whitespace alike.
+
+  What this buys is the *message*, not the fail-fast — which is worth stating precisely, because the
+  first draft of this entry had it wrong and the mutation below is what corrected it. An empty path
+  already stopped the service: `AddDocumentsStore` and `AddCabinetCatalog` call
+  `ArgumentException.ThrowIfNullOrWhiteSpace`, so it died one frame later with
+  `storagePath (Parameter 'storagePath')` — an exception naming a *method parameter* a reader cannot
+  act on, rather than the setting a deployment has to fix. `AGENTS.md` requires startup to fail
+  "with a message naming the setting"; a placeholder that is left blank is exactly the case that
+  needs it, so the check belongs where the setting is read.
+
+  Pinned by `StartupSettingsTests` in both API test projects (5 tests). Verified the way this
+  repository asks: replacing `string.IsNullOrWhiteSpace(value)` with `value is null` fails all three
+  Archive tests. Worth noting that the pre-existing suite could not have caught the regression —
+  the endpoint harnesses supply every required setting through `UseSetting`, which outranks the
+  file — so the harnesses gained init properties (`CabinetsFile`, `StoragePath`,
+  `ArchiveBaseAddress`) that let a test blank one.
 - **`PlanState` was merged into `UploadEntryOutcome`, because** two enums described the same entry
   at two moments in its life, and the planner's `ToStore` and the report's `Stored` were the same
   statement. One vocabulary now runs from plan to response: planning says `Stored` or `Skipped`,
@@ -1337,7 +1368,7 @@ Where the AI was wrong, and how it was caught.
 
 ## Time log
 
-Rough, as the brief asks for, and grouped per session rather than per prompt. ~30.5 h in total.
+Rough, as the brief asks for, and grouped per session rather than per prompt. ~31.0 h in total.
 
 | Date | Time | What |
 |---|---|---|
@@ -1366,3 +1397,4 @@ Rough, as the brief asks for, and grouped per session rather than per prompt. ~3
 | 2026-10-31 | ~0.4 h | Removed health checking from both services on instruction: the two endpoints each, the three checks behind them, the compose `healthcheck` blocks, the `service_healthy` gate, and the `apt-get` layer that existed only to put `curl` in the runtime images for it. `DocumentStorageRoot.CanWrite` went too — the storage probe was its only caller. 11 tests removed with the behaviour they pinned; 411 remain, 0 warnings. Recorded what the gating bought, since the brief's "services may start in any order" is now answered by the Export's `502` alone. |
 | 2026-11-01 | ~0.6 h | Built `GET /cabinets`, the last Archive gap: every cabinet with its fields, each answering `type`, `maxLength`, `writable` and `choosable`. `choosable` exists so a client's upload-field and marker-field pickers do not restate "writable and text" — `Cabinet.WritableTextFields` put on the wire. Then split the five-action `CabinetsController` into one controller per entity, routes unchanged; the existing endpoint tests passing against the same URLs is the proof. 23 new tests (mapping and endpoint), and a mutation that makes every field choosable fails 7 of them. 434 tests, 0 warnings |
 | 2026-11-01 | ~0.5 h | CORS on both services, closing the last non-client gap: one comma-separated `AllowedOrigins` setting each, empty meaning any origin, `UseCors` placed before the error shapes so a refusal stays readable cross-origin, and `Content-Disposition` exposed on the Export so the download's name is not restated in the client. 10 endpoint tests; removing `app.UseCors()` fails 4 of 5 per service. Caught that exact removal for real: a cleanup pass stripped the call along with its comment, which would have left `AddCors` registered and never applied. 444 tests, 0 warnings |
+| 2026-11-01 | ~0.5 h | Stripped the `"//…"` comment keys out of both `appsettings.json`, leaving every setting a reader needs as a placeholder of the type it wants — the required ones as `""` rather than absent, so the full set is still visible in one place. The prose was a second copy of the settings table in `README.md`. Flagged that this made `Configuration[key] ?? throw` dead, since `""` is a supplied value, so both services now read required settings through a `RequiredSetting` guard that rejects empty and whitespace too; `StartupSettingsTests` pins it in both API projects, and `value is null` in place of the check fails all three Archive tests. The mutation also corrected this log: the first draft claimed an empty path would have reached the content root, when in fact `ThrowIfNullOrWhiteSpace` in the three `Add*` extensions already stopped startup — one frame later, naming a method parameter instead of the setting, which is the actual thing fixed. Brought `README.md` and `AGENTS.md` back in line with `appsettings.Development.json` while there: it had gained the two Archive paths, which both documents still said it deliberately omitted. 449 tests, 0 warnings |

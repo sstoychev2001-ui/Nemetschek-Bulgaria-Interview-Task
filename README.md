@@ -140,7 +140,7 @@ Tests need no containers and run straight from the repository. Requires the .NET
 
 ```bash
 dotnet build                        # warnings are errors
-dotnet test                         # offline, no containers — 389 tests
+dotnet test                         # offline, no containers — 449 tests
 dotnet test --collect:"XPlat Code Coverage"   # 98.9% of lines
 ```
 
@@ -426,10 +426,17 @@ docker compose run -e Archive__MaxPageSize=5 archive-api
 (`nemetschek-archive_archive-data`); without it Compose names the project after the directory, and
 the Archive would come up pointing at a different, empty volume.
 
-Neither path is defaulted in `appsettings.Development.json`, on purpose: a relative path there
-would resolve against the **content root** — `/app` inside the image — so a deployment that forgot
-to mount a volume would store documents in the container's own layer and lose them at the next
-restart, without a word. Required-and-absent fails at startup instead, naming the setting.
+`appsettings.json` lists every setting each service reads, the required ones as empty placeholders
+that show the expected type. It carries no comment keys — the table above is the documentation, so
+the file stays plain JSON a reader can diff against what a deployment actually supplies. **An empty
+placeholder counts as unset**: startup fails naming the setting, exactly as a missing key does.
+
+`appsettings.Development.json` defaults the two Archive paths to repository-relative locations
+(`../../fixtures/cabinets.json`, `../../.archive-data`) so that a local `dotnet run` needs no
+environment variables. That is safe only because it is the Development file and the containers run
+as `Production`: a relative path reaching a container would resolve against the **content root** —
+`/app` inside the image — so a deployment that forgot to mount a volume would store documents in
+the container's own layer and lose them at the next restart, without a word.
 
 **Both resolved paths are logged at startup**, so there is never a need to work out where the data
 went:

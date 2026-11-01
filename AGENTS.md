@@ -311,7 +311,7 @@ a moment before the first export.
 
 ```bash
 dotnet build          # warnings are errors
-dotnet test           # offline, no containers — 444 tests across six test projects
+dotnet test           # offline, no containers — 449 tests across six test projects
 docker compose up --build -d          # both services; give the Archive a moment before exporting
 
 # Running from source needs both paths, because neither is defaulted:
@@ -334,11 +334,14 @@ entries byte-identical, the sixteenth being the nested file the upload rules ski
 
 **Configuration is single-sourced in `docker-compose.yml`**, literally — there is no `.env` and no
 override file. Keep `name: nemetschek-archive` at the top: it prefixes the documents' volume, and
-losing it brings the Archive up against an empty one. `appsettings.Development.json` deliberately
-carries no `Archive` section, because a relative path there resolves against the content root —
-`/app` inside the image — so a forgotten volume mount would store documents in the container's own
-layer and lose them silently. If you add a setting, add it to `docker-compose.yml` and to the table
-in `README.md`.
+losing it brings the Archive up against an empty one. `appsettings.json` lists every setting a
+service reads, the required ones as empty placeholders naming the expected type, and no comment
+keys — the settings table in `README.md` is the documentation. `appsettings.Development.json`
+defaults the two Archive paths for a local `dotnet run`; that stays safe only because the containers
+run as `Production`, since a relative path there resolves against the content root — `/app` inside
+the image — so a forgotten volume mount would store documents in the container's own layer and lose
+them silently. If you add a setting, add it to `docker-compose.yml`, to `appsettings.json` as a
+typed placeholder, and to the table in `README.md`.
 
 **To check a test really pins its rule, break the rule and confirm *that* test fails.** Done for the
 writable-field rule (removing the check fails exactly its two tests), the Core-package rule (adding
@@ -347,10 +350,12 @@ the whole `catch` arm fails exactly `A_store_failure_is_logged_with_its_exceptio
 while deleting only the `LogError` does **not** compile, because the unused `exception` variable is
 a warning and warnings are errors.
 
-**Startup is fail-fast.** An absent `Archive:CabinetsFile` or `Export:ArchiveBaseAddress`, or a
-storage path that cannot be created, stops the service with a message naming the setting. Keep that
-property for any setting you add: a service that starts and then fails every request is harder to
-diagnose than one that refuses to start.
+**Startup is fail-fast.** An absent *or empty* `Archive:CabinetsFile` or `Export:ArchiveBaseAddress`,
+or a storage path that cannot be created, stops the service with a message naming the setting. The
+absent-or-empty check is the `RequiredSetting` local function at the foot of each service's
+`Program.cs`; read a required setting through it rather than through the indexer. Keep that property
+for any setting you add: a service that starts and then fails every request is harder to diagnose
+than one that refuses to start.
 
 ## Documentation upkeep — required
 

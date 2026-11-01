@@ -24,14 +24,12 @@ builder.Services.AddHttpLogging(options =>
     options.CombineLogs = true;
 });
 
-var cabinetsFile = builder.Configuration["Archive:CabinetsFile"]
-    ?? throw new InvalidOperationException("Setting 'Archive:CabinetsFile' is required");
+var cabinetsFile = RequiredSetting(builder.Configuration, "Archive:CabinetsFile");
 
 var resolvedCabinetsFile = CabinetsServiceCollectionExtensions.ResolvePath(
     cabinetsFile, builder.Environment.ContentRootPath);
 
-var storagePath = builder.Configuration["Archive:StoragePath"]
-    ?? throw new InvalidOperationException("Setting 'Archive:StoragePath' is required");
+var storagePath = RequiredSetting(builder.Configuration, "Archive:StoragePath");
 
 var resolvedStoragePath = CabinetsServiceCollectionExtensions.ResolvePath(
     storagePath, builder.Environment.ContentRootPath);
@@ -91,3 +89,18 @@ app.UseSwaggerUI(options => options.SwaggerEndpoint("/openapi/v1.json", "Archive
 app.MapControllers();
 
 app.Run();
+
+// appsettings.json lists every setting the service reads, the required ones as empty placeholders
+// that show the expected type. An empty placeholder therefore means unset, exactly as a missing key
+// does, and both have to fail here naming the setting rather than further in.
+static string RequiredSetting(IConfiguration configuration, string key)
+{
+    var value = configuration[key];
+
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        throw new InvalidOperationException($"Setting '{key}' is required");
+    }
+
+    return value;
+}

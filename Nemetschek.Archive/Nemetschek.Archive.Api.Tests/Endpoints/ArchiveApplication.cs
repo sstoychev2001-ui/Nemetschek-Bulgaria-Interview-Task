@@ -19,10 +19,18 @@ internal sealed class ArchiveApplication : WebApplicationFactory<CabinetsControl
     /// <summary>The origins the client may be served from, as `Archive:AllowedOrigins` would set them.</summary>
     public string AllowedOrigins { get; init; } = "";
 
+    /// <summary>Path to cabinets.json, as `Archive:CabinetsFile` would set it. Null uses the fixture.</summary>
+    public string? CabinetsFile { get; init; }
+
+    /// <summary>Documents directory, as `Archive:StoragePath` would set it. Null uses a throwaway one.</summary>
+    public string? StoragePath { get; init; }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseSetting("Archive:CabinetsFile", RepositoryLayout.Path("fixtures", "cabinets.json"));
-        builder.UseSetting("Archive:StoragePath", storagePath);
+        builder.UseSetting(
+            "Archive:CabinetsFile",
+            CabinetsFile ?? RepositoryLayout.Path("fixtures", "cabinets.json"));
+        builder.UseSetting("Archive:StoragePath", StoragePath ?? storagePath);
         builder.UseSetting("Archive:MaxPageSize", MaxPageSize.ToString());
         builder.UseSetting("Archive:AllowedOrigins", AllowedOrigins);
         builder.UseEnvironment("Production");
