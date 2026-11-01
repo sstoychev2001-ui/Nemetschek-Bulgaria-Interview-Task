@@ -25,16 +25,14 @@ public sealed class ExportExceptionMiddleware(
 
             if (context.Response.HasStarted)
             {
-                logger.LogError(
-                    exception,
+                logger.LogError(exception,
                     "The export failed after the response had started; the archive the caller " +
                     "received is incomplete");
 
                 throw;
             }
 
-            logger.LogInformation(
-                "{Status} {Title}: {Reason}", refusal.Status, refusal.Title, exception.Message);
+            logger.LogInformation("{Status} {Title}: {Reason}", refusal.Status, refusal.Title, exception.Message);
 
             context.Response.StatusCode = refusal.Status;
 
@@ -60,7 +58,6 @@ public sealed class ExportExceptionMiddleware(
         HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest or
             System.Net.HttpStatusCode.NotFound } => new Refusal(
             StatusCodes.Status400BadRequest, "The Archive refused the export"),
-
         HttpRequestException => new Refusal(
             StatusCodes.Status502BadGateway, "The Archive is unreachable"),
         InvalidDataException => new Refusal(

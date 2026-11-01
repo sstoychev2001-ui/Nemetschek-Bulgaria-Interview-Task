@@ -165,10 +165,6 @@ public sealed class ArchiveHttpClientTests
 
         Assert.Equal(status, failure.StatusCode);
 
-        // The status is carried, which is what ExportExceptionMiddleware splits 400 from 502 on.
-        // The Archive's own sentence is not: EnsureSuccessStatusCode never reads the body, so the
-        // reason it refused does not reach the Export's caller. See "What the Archive refuses" in
-        // DECISIONS.md.
         Assert.DoesNotContain("Unknown file cabinet", failure.Message, StringComparison.Ordinal);
     }
 

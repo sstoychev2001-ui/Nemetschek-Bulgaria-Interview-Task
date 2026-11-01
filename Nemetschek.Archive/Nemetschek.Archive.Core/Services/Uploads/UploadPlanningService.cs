@@ -38,14 +38,16 @@ public sealed class UploadPlanningService
 
         planned.AddRange(parts
             .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-            .Select(entry => UploadEntry.ToStore(Document.ToStore(
-                cabinet.Name,
-                entry.Key,
-                new Dictionary<string, IndexValue>(StringComparer.OrdinalIgnoreCase)
+            .Select(entry => UploadEntry.ToStore(new Document
+            {
+                CabinetName = cabinet.Name,
+                Title = entry.Key,
+                IndexValues = new Dictionary<string, IndexValue>(StringComparer.OrdinalIgnoreCase)
                 {
                     [field.Name] = new IndexValue.Text(request.FolderName),
                 },
-                [.. entry.Value.OrderBy(part => part.Name, StringComparer.Ordinal)]))));
+                Parts = [.. entry.Value.OrderBy(part => part.Name, StringComparer.Ordinal)]
+            })));
 
         return planned;
     }

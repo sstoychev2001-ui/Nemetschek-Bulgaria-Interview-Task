@@ -46,20 +46,6 @@ public sealed record Document : IValidatableObject, IJsonOnDeserialized
     [JsonPropertyName("modifiedAt")]
     public DateTimeOffset ModifiedAt { get; init; }
 
-    /// <summary>A document on its way into the Archive, before the store has seen it.</summary>
-    public static Document ToStore(
-        string cabinetName,
-        string title,
-        IReadOnlyDictionary<string, IndexValue> indexValues,
-        IReadOnlyList<Part> parts) =>
-        new()
-        {
-            CabinetName = cabinetName,
-            Title = title,
-            IndexValues = indexValues,
-            Parts = parts,
-        };
-
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         var results = new List<ValidationResult>();

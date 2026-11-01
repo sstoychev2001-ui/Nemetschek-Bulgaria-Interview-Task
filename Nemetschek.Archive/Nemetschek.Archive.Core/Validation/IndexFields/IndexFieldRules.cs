@@ -50,6 +50,17 @@ public static class IndexFieldRules
     }
 
     /// <summary>
+    /// Checks a write of several values into one cabinet's index fields. Returns a violation for
+    /// every value that is refused, and nothing when all of them are allowed.
+    /// </summary>
+    public static IReadOnlyList<FieldViolation> ValidateWrites(
+        Cabinet cabinet,
+        IReadOnlyDictionary<string, IndexValue> values) =>
+        [.. values
+            .Select(value => ValidateWrite(cabinet, value.Key, value.Value))
+            .OfType<FieldViolation>()];
+
+    /// <summary>
     /// Checks that a field may be chosen as the upload field or the export marker field. Returns
     /// <c>null</c> when the choice is allowed, otherwise the reason it was refused.
     /// </summary>

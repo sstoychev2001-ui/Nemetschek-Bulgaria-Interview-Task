@@ -42,7 +42,13 @@ public sealed class DomainValidationTests
     [Fact]
     public void A_stored_document_without_an_id_is_invalid()
     {
-        var document = Document.ToStore("Invoices", "invoice-001.txt", Values(), []);
+        var document = new Document
+        {
+            CabinetName = "Invoices",
+            Title = "invoice-001.txt",
+            IndexValues = Values(),
+            Parts = [],
+        };
 
         Assert.Contains(
             "a stored document has no 'id'",
@@ -52,9 +58,13 @@ public sealed class DomainValidationTests
     [Fact]
     public void A_stored_document_with_an_id_a_cabinet_and_a_title_is_valid()
     {
-        var document = Document.ToStore("Invoices", "invoice-001.txt", Values(), []) with
+        var document = new Document
         {
             Id = Guid.CreateVersion7(),
+            CabinetName = "Invoices",
+            Title = "invoice-001.txt",
+            IndexValues = Values(),
+            Parts = [],
         };
 
         Assert.Empty(Validate(document));
@@ -68,9 +78,13 @@ public sealed class DomainValidationTests
         string title,
         string expected)
     {
-        var document = Document.ToStore(cabinetName, title, Values(), []) with
+        var document = new Document
         {
             Id = Guid.CreateVersion7(),
+            CabinetName = cabinetName,
+            Title = title,
+            IndexValues = Values(),
+            Parts = [],
         };
 
         Assert.Contains(expected, Validate(document, allProperties: true));

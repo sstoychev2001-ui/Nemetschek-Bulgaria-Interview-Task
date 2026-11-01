@@ -42,9 +42,6 @@ public sealed class CalendarRangeTests
     [Fact]
     public void An_instant_is_judged_by_its_UTC_day_whatever_offset_it_carries()
     {
-        // 00:30 on the 1st at +02:00 is 22:30 UTC on the 28th of February, so it belongs to the
-        // 28th. That is the cost of reading dates in UTC rather than in the caller's zone, and it is
-        // the whole content of "Removed: the time zone parameter" in DECISIONS.md.
         var day = new DateOnly(2026, 3, 1);
         var range = CalendarRange.Of(day, day);
 

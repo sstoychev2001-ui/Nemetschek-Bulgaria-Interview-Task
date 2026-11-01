@@ -51,7 +51,17 @@ public sealed class DocumentsServiceTests
     [Fact]
     public async Task The_store_page_is_returned_as_it_is()
     {
-        var page = new DocumentPage([Document.ToStore("Invoices", "a", new Dictionary<string, Core.Domain.IndexFields.IndexValue>(), [])], 7);
+        var page = new DocumentPage(
+            [
+                new Document
+                {
+                    CabinetName = "Invoices",
+                    Title = "a",
+                    IndexValues = new Dictionary<string, IndexValue>(),
+                    Parts = [],
+                },
+            ],
+            7);
         var store = new RecordingStore { Page = page };
 
         Assert.Same(page, await Service(store).ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None));
@@ -73,9 +83,15 @@ public sealed class DocumentsServiceTests
 
         public StoredRange? AskedOver { get; private set; }
 
-        public Document? Found { get; init; }
+        public Document Found { get; init; } = new()
+        {
+            CabinetName = "Invoices",
+            Title = "a.txt",
+            IndexValues = new Dictionary<string, IndexValue>(),
+            Parts = [],
+        };
 
-        public Stream? Content { get; init; }
+        public Stream Content { get; init; } = new MemoryStream();
 
         public IReadOnlyDictionary<string, IndexValue>? Written { get; private set; }
 
@@ -97,7 +113,7 @@ public sealed class DocumentsServiceTests
             return Task.FromResult(Page);
         }
 
-        public Task<Document?> FindAsync(
+        public Task<Document> FindAsync(
             string cabinetName,
             Guid documentId,
             CancellationToken cancellationToken)
@@ -107,7 +123,7 @@ public sealed class DocumentsServiceTests
             return Task.FromResult(Found);
         }
 
-        public Task<Stream?> OpenPartAsync(
+        public Task<Stream> OpenPartAsync(
             string cabinetName,
             Guid documentId,
             Guid partId,
@@ -118,7 +134,7 @@ public sealed class DocumentsServiceTests
             return Task.FromResult(Content);
         }
 
-        public Task<Document?> SetIndexValuesAsync(
+        public Task SetIndexValuesAsync(
             string cabinetName,
             Guid documentId,
             IReadOnlyDictionary<string, IndexValue> values,
@@ -127,7 +143,7 @@ public sealed class DocumentsServiceTests
             AskedFor = cabinetName;
             Written = values;
 
-            return Task.FromResult(Found);
+            return Task.CompletedTask;
         }
     }
 }

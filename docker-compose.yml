@@ -1,5 +1,5 @@
-# Rotation is set here rather than left to the daemon default so a long-running service cannot fill the
-# disk with logs. The brief asks that an operation leave nothing behind that grows forever.
+name: nemetschek-archive
+
 x-logging: &default-logging
   driver: json-file
   options:
@@ -14,37 +14,39 @@ services:
       dockerfile: Nemetschek.Archive/Nemetschek.Archive.Api/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      # Points at the mount below. Override it to run the same image with a different cabinet set.
       Archive__CabinetsFile: /app/fixtures/cabinets.json
-      # Points at the named volume below, which is what makes documents outlive the container.
       Archive__StoragePath: /var/lib/archive
-      # The knobs the brief requires to be configurable, so the same image runs with different
-      # settings. Defaults are in .env, which holds non-secret values only.
-      # The review demo runs with ARCHIVE_MAX_PAGE_SIZE=5.
-      Archive__MaxPageSize: ${ARCHIVE_MAX_PAGE_SIZE:-50}
-      Archive__MaxUploadBytes: ${ARCHIVE_MAX_UPLOAD_BYTES:-268435456}
-      Archive__MaxUploadEntries: ${ARCHIVE_MAX_UPLOAD_ENTRIES:-10000}
-    volumes:    
+      Archive__MaxPageSize: 50
+      Archive__MaxUploadBytes: 268435456
+      Archive__MaxUploadEntries: 10000
+    volumes:
       - ./fixtures:/app/fixtures:ro
       - archive-data:/var/lib/archive
     ports:
-      - "${ARCHIVE_PORT:-8080}:8080"
+      - "8080:8080"
     restart: unless-stopped
-    # Long enough for an in-flight upload to be abandoned cleanly on `down`. Anything it had
-    # staged is swept at the next start, so a hard kill would not corrupt the store either.
     stop_grace_period: 15s
-    # Everything a user uploads is untrusted and the process has no reason to gain privileges.
     security_opt:
       - no-new-privileges:true
     logging: *default-logging
-    healthcheck:
-      # Readiness, not liveness: this is what a dependent service should wait on.
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/ready"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
+
+  export-api:
+    image: nemetschek-export-api
+    build:
+      context: .
+      dockerfile: Nemetschek.Export/Nemetschek.Export.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Export__ArchiveBaseAddress: http://archive-api:8080
+    ports:
+      - "8081:8080"
+    depends_on:
+      - archive-api
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
 volumes:
-  # Survives `docker compose down`. Delete it deliberately with `docker compose down -v`.
   archive-data:

@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Nemetschek.Archive.Core.Services.Documents;
 using Nemetschek.Archive.Core.Services.Interfaces.Documents;
-using Nemetschek.Archive.Infrastructure.Health;
 
 namespace Nemetschek.Archive.Infrastructure;
 
@@ -31,23 +30,17 @@ public static class DocumentsServiceCollectionExtensions
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storagePath);
 
-        var root = CabinetsServiceCollectionExtensions.ResolvePath(storagePath, basePath);
+        var root = new DocumentStorageRoot(
+            CabinetsServiceCollectionExtensions.ResolvePath(storagePath, basePath));
 
-        // Here rather than inside the registration below, so a root the service cannot use stops
-        // startup instead of failing the first request that needs it.
-        DocumentsStoreService.Prepare(root);
+        root.Prepare();
 
-        // Registered under both: the port is what the rules depend on, and the concrete type is
-        // what the readiness check needs in order to probe the volume. One instance either way —
-        // the store keeps no state, but it does hold a logger, so it is built from the container.
-        services.AddSingleton(provider => new DocumentsStoreService(
+        services.AddSingleton(root);
+        services.AddSingleton<IDocumentStore>(provider => new DocumentsStoreService(
             root,
             TimeProvider.System,
             provider.GetRequiredService<ILogger<DocumentsStoreService>>()));
-        services.AddSingleton<IDocumentStore>(
-            provider => provider.GetRequiredService<DocumentsStoreService>());
         services.AddScoped<DocumentsService>();
-        services.AddHealthChecks().AddCheck<DocumentStorageHealthCheck>("storage", tags: ["ready"]);
 
         return services;
     }

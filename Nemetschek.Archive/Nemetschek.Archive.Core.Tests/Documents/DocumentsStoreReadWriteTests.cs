@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
+using Nemetschek.Archive.Core.Exceptions.Documents;
 using Nemetschek.Archive.Core.Services.Documents;
 using Nemetschek.Archive.Core.Validation.Documents;
 
@@ -21,8 +22,9 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
 
     public DocumentsStoreReadWriteTests()
     {
-        DocumentsStoreService.Prepare(root);
-        store = new DocumentsStoreService(root, clock, NullLogger<DocumentsStoreService>.Instance);
+        new DocumentStorageRoot(root).Prepare();
+        store = new DocumentsStoreService(
+            new DocumentStorageRoot(root), clock, NullLogger<DocumentsStoreService>.Instance);
     }
 
     [Fact]
@@ -32,24 +34,29 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
 
         var found = await store.FindAsync("Invoices", stored.Id, CancellationToken.None);
 
-        Assert.Equal(stored.Id, found!.Id);
+        Assert.Equal(stored.Id, found.Id);
         Assert.Equal("invoice-001.txt", found.Title);
     }
 
     [Fact]
-    public async Task An_id_the_cabinet_does_not_hold_is_not_found()
+    public async Task An_id_the_cabinet_does_not_hold_is_refused()
     {
         await Add("invoice-001.txt", "page1.txt");
+        var missing = Guid.CreateVersion7();
 
-        Assert.Null(await store.FindAsync("Invoices", Guid.CreateVersion7(), CancellationToken.None));
+        var refusal = await Assert.ThrowsAsync<DocumentNotFoundException>(
+            () => store.FindAsync("Invoices", missing, CancellationToken.None));
+
+        Assert.Equal(missing, refusal.DocumentId);
     }
 
     [Fact]
-    public async Task A_document_is_not_found_through_another_cabinet()
+    public async Task A_document_is_not_reachable_through_another_cabinet()
     {
         var stored = await Add("invoice-001.txt", "page1.txt");
 
-        Assert.Null(await store.FindAsync("Contracts", stored.Id, CancellationToken.None));
+        await Assert.ThrowsAsync<DocumentNotFoundException>(
+            () => store.FindAsync("Contracts", stored.Id, CancellationToken.None));
     }
 
     [Fact]
@@ -60,7 +67,7 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
         await using var content = await store.OpenPartAsync(
             "Invoices", stored.Id, stored.Parts[0].Id, CancellationToken.None);
 
-        Assert.Equal("content of page1.txt", await new StreamReader(content!).ReadToEndAsync());
+        Assert.Equal("content of page1.txt", await new StreamReader(content).ReadToEndAsync());
     }
 
     [Fact]
@@ -71,23 +78,25 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
         await using var content = await store.OpenPartAsync(
             "Invoices", stored.Id, stored.Parts[1].Id, CancellationToken.None);
 
-        Assert.Equal("content of page2.txt", await new StreamReader(content!).ReadToEndAsync());
+        Assert.Equal("content of page2.txt", await new StreamReader(content).ReadToEndAsync());
     }
 
     [Fact]
-    public async Task A_part_id_the_document_does_not_have_is_not_found()
+    public async Task A_part_id_the_document_does_not_have_is_refused()
     {
         var stored = await Add("invoice-001.txt", "page1.txt");
 
-        Assert.Null(await store.OpenPartAsync(
-            "Invoices", stored.Id, Guid.CreateVersion7(), CancellationToken.None));
+        await Assert.ThrowsAsync<DocumentNotFoundException>(
+            () => store.OpenPartAsync(
+                "Invoices", stored.Id, Guid.CreateVersion7(), CancellationToken.None));
     }
 
     [Fact]
-    public async Task A_part_of_a_document_that_is_not_there_is_not_found()
+    public async Task A_part_of_a_document_that_is_not_there_is_refused()
     {
-        Assert.Null(await store.OpenPartAsync(
-            "Invoices", Guid.CreateVersion7(), Guid.CreateVersion7(), CancellationToken.None));
+        await Assert.ThrowsAsync<DocumentNotFoundException>(
+            () => store.OpenPartAsync(
+                "Invoices", Guid.CreateVersion7(), Guid.CreateVersion7(), CancellationToken.None));
     }
 
     [Fact]
@@ -95,20 +104,16 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
     {
         var stored = await Add("invoice-001.txt", "page1.txt");
 
-        var updated = await store.SetIndexValuesAsync(
+        await store.SetIndexValuesAsync(
             "Invoices",
             stored.Id,
             new Dictionary<string, IndexValue> { ["Batch"] = new IndexValue.Text("Exported on 2026-03-01") },
             CancellationToken.None);
 
-        Assert.Equal(
-            "Exported on 2026-03-01",
-            Assert.IsType<IndexValue.Text>(updated!.IndexValues["Batch"]).Value);
-
         var reread = await store.FindAsync("Invoices", stored.Id, CancellationToken.None);
         Assert.Equal(
             "Exported on 2026-03-01",
-            Assert.IsType<IndexValue.Text>(reread!.IndexValues["Batch"]).Value);
+            Assert.IsType<IndexValue.Text>(reread.IndexValues["Batch"]).Value);
     }
 
     [Fact]
@@ -116,14 +121,15 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
     {
         var stored = await Add("invoice-001.txt", "page1.txt");
 
-        var updated = await store.SetIndexValuesAsync(
+        await store.SetIndexValuesAsync(
             "Invoices",
             stored.Id,
             new Dictionary<string, IndexValue> { ["Status"] = new IndexValue.Text("Done") },
             CancellationToken.None);
 
-        Assert.Equal("sample-material", Assert.IsType<IndexValue.Text>(updated!.IndexValues["Batch"]).Value);
-        Assert.Equal("Done", Assert.IsType<IndexValue.Text>(updated.IndexValues["Status"]).Value);
+        var reread = await store.FindAsync("Invoices", stored.Id, CancellationToken.None);
+        Assert.Equal("sample-material", Assert.IsType<IndexValue.Text>(reread.IndexValues["Batch"]).Value);
+        Assert.Equal("Done", Assert.IsType<IndexValue.Text>(reread.IndexValues["Status"]).Value);
     }
 
     [Fact]
@@ -131,14 +137,15 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
     {
         var stored = await Add("invoice-001.txt", "page1.txt");
 
-        var updated = await store.SetIndexValuesAsync(
+        await store.SetIndexValuesAsync(
             "Invoices",
             stored.Id,
             new Dictionary<string, IndexValue> { ["batch"] = new IndexValue.Text("again") },
             CancellationToken.None);
 
-        Assert.Equal("again", Assert.IsType<IndexValue.Text>(updated!.IndexValues["Batch"]).Value);
-        Assert.Single(updated.IndexValues);
+        var reread = await store.FindAsync("Invoices", stored.Id, CancellationToken.None);
+        Assert.Equal("again", Assert.IsType<IndexValue.Text>(reread.IndexValues["Batch"]).Value);
+        Assert.Single(reread.IndexValues);
     }
 
     [Fact]
@@ -147,14 +154,15 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
         var stored = await Add("invoice-001.txt", "page1.txt");
         clock.Now = clock.Now.AddDays(5);
 
-        var updated = await store.SetIndexValuesAsync(
+        await store.SetIndexValuesAsync(
             "Invoices",
             stored.Id,
             new Dictionary<string, IndexValue> { ["Batch"] = new IndexValue.Text("later") },
             CancellationToken.None);
 
-        Assert.Equal(stored.StoredAt, updated!.StoredAt);
-        Assert.Equal(clock.Now, updated.ModifiedAt);
+        var reread = await store.FindAsync("Invoices", stored.Id, CancellationToken.None);
+        Assert.Equal(stored.StoredAt, reread.StoredAt);
+        Assert.Equal(clock.Now, reread.ModifiedAt);
     }
 
     [Fact]
@@ -169,11 +177,11 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
             CancellationToken.None);
 
         var reread = await store.FindAsync("Invoices", stored.Id, CancellationToken.None);
-        Assert.Equal(["page1.txt", "page2.txt"], reread!.Parts.Select(part => part.Name));
+        Assert.Equal(["page1.txt", "page2.txt"], reread.Parts.Select(part => part.Name));
 
         await using var content = await store.OpenPartAsync(
             "Invoices", stored.Id, stored.Parts[0].Id, CancellationToken.None);
-        Assert.Equal("content of page1.txt", await new StreamReader(content!).ReadToEndAsync());
+        Assert.Equal("content of page1.txt", await new StreamReader(content).ReadToEndAsync());
     }
 
     [Fact]
@@ -191,13 +199,21 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
     }
 
     [Fact]
-    public async Task Changing_a_document_that_is_not_there_changes_nothing()
+    public async Task Changing_a_document_that_is_not_there_is_refused_and_changes_nothing()
     {
-        Assert.Null(await store.SetIndexValuesAsync(
+        var untouched = await Add("invoice-001.txt", "page1.txt");
+
+        await Assert.ThrowsAsync<DocumentNotFoundException>(() => store.SetIndexValuesAsync(
             "Invoices",
             Guid.CreateVersion7(),
             new Dictionary<string, IndexValue> { ["Batch"] = new IndexValue.Text("later") },
             CancellationToken.None));
+
+        var reread = await store.FindAsync("Invoices", untouched.Id, CancellationToken.None);
+        Assert.Equal(
+            "sample-material",
+            Assert.IsType<IndexValue.Text>(reread.IndexValues["Batch"]).Value);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(root, "tmp")));
     }
 
     [Fact]
@@ -249,9 +265,6 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
     [Fact]
     public async Task A_document_belongs_to_the_UTC_day_it_was_stored_on()
     {
-        // 23:00 UTC on the 28th of February is the 28th, not the 1st of March — dates are read in
-        // UTC, so a caller whose own day differs sees UTC's boundary. See "Removed: the time zone
-        // parameter" in DECISIONS.md.
         clock.Now = new DateTimeOffset(2026, 2, 28, 23, 0, 0, TimeSpan.Zero);
         await Add("late-february.txt", "page1.txt");
 
@@ -264,6 +277,24 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
             (await store.ListAsync("Invoices", lastOfFebruary, 0, 10, CancellationToken.None)).Documents);
     }
 
+    [Fact]
+    public async Task A_window_that_starts_inside_a_day_excludes_what_was_stored_before_it()
+    {
+        clock.Now = new DateTimeOffset(2026, 3, 1, 9, 0, 0, TimeSpan.Zero);
+        await Add("morning.txt", "page1.txt");
+        clock.Now = new DateTimeOffset(2026, 3, 1, 15, 0, 0, TimeSpan.Zero);
+        await Add("afternoon.txt", "page1.txt");
+
+        var afternoon = new StoredRange(
+            new DateTimeOffset(2026, 3, 1, 12, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero));
+
+        var page = await store.ListAsync("Invoices", afternoon, 0, 10, CancellationToken.None);
+
+        Assert.Equal(["afternoon.txt"], page.Documents.Select(document => document.Title));
+        Assert.Equal(1, page.Total);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))
@@ -274,16 +305,21 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
 
     private Task<Document> Add(string title, params string[] partNames) =>
         store.AddAsync(
-            Document.ToStore(
-                "Invoices",
-                title,
-                new Dictionary<string, IndexValue>(StringComparer.OrdinalIgnoreCase)
+            new Document
+            {
+                CabinetName = "Invoices",
+                Title = title,
+                IndexValues = new Dictionary<string, IndexValue>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["Batch"] = new IndexValue.Text("sample-material"),
                 },
-                [.. partNames.Select(name => Part.ToStore(
-                    name,
-                    () => new MemoryStream(Encoding.UTF8.GetBytes($"content of {name}"))))]),
+                Parts =
+                [
+                    .. partNames.Select(name => Part.ToStore(
+                        name,
+                        () => new MemoryStream(Encoding.UTF8.GetBytes($"content of {name}")))),
+                ],
+            },
             CancellationToken.None);
 
     private Task<Document> AddOn(DateOnly day, string title)

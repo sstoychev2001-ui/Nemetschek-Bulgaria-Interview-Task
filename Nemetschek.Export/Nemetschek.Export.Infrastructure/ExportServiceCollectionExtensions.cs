@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Nemetschek.Export.Core.Services.Exports;
 using Nemetschek.Export.Core.Services.Interfaces;
 using Nemetschek.Export.Infrastructure.Archive;
-using Nemetschek.Export.Infrastructure.Health;
 
 namespace Nemetschek.Export.Infrastructure;
 
@@ -42,16 +41,8 @@ public static class ExportServiceCollectionExtensions
             client.Timeout = Timeout.InfiniteTimeSpan;
         });
 
-        services.AddHttpClient<ArchiveReachableHealthCheck>(client =>
-        {
-            client.BaseAddress = Ends(baseAddress);
-            client.Timeout = TimeSpan.FromSeconds(2);
-        });
-
         services.AddScoped<ExportService>();
         services.AddSingleton(TimeProvider.System);
-        services.AddHealthChecks()
-            .AddCheck<ArchiveReachableHealthCheck>("archive", tags: ["ready"]);
 
         return services;
     }

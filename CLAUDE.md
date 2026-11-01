@@ -13,7 +13,7 @@ the task, not "later". This holds for all sessions in this folder.
 | `README.md` | Build/run/test steps or required settings change |
 | `AGENTS.md` | Architecture, where a rule lives, or a convention changes |
 | `DECISIONS.md` | Any decision is made ("A, because B"), anything is cut, the AI was wrong, or time was spent (append to the time log) |
-| `docs/*.md` | The understanding of a feature's requirements changes |
+| `DECISIONS.md` | The understanding of a feature's requirements changes — under that feature's section |
 
 Time log entries are rough by design — the brief asks for "an honest, rough time log". Record the work done
 and an approximate duration; do not invent precision. Group a session's work into one row rather than one

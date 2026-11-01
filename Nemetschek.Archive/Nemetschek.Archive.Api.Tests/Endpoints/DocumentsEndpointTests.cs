@@ -133,23 +133,6 @@ public sealed class DocumentsEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task Liveness_answers_without_running_any_check()
-    {
-        var response = await client.GetAsync("/health", Token);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Readiness_answers_healthy_on_a_usable_deployment()
-    {
-        var response = await client.GetAsync("/health/ready", Token);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync(Token));
-    }
-
-    [Fact]
     public async Task The_service_describes_itself_in_OpenAPI()
     {
         var response = await client.GetAsync("/openapi/v1.json", Token);

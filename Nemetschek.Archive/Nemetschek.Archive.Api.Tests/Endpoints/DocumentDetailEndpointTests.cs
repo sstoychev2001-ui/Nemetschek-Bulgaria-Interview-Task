@@ -20,8 +20,6 @@ public sealed class DocumentDetailEndpointTests : IDisposable
 
     public DocumentDetailEndpointTests() => client = application.CreateClient();
 
-    // --- a part's content ----------------------------------------------------------------------
-
     [Fact]
     public async Task A_parts_content_comes_back_byte_for_byte()
     {
@@ -90,8 +88,6 @@ public sealed class DocumentDetailEndpointTests : IDisposable
         var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(Token);
         Assert.Equal("Unknown file cabinet", problem!.Title);
     }
-
-    // --- writing index values back --------------------------------------------------------------
 
     [Fact]
     public async Task An_index_value_is_set_and_comes_back_on_the_document()
@@ -211,8 +207,6 @@ public sealed class DocumentDetailEndpointTests : IDisposable
     [Fact]
     public async Task An_id_the_cabinet_does_not_hold_refuses_the_whole_batch()
     {
-        // Every document is resolved before any of them is written, so one bad id leaves the good
-        // ones untouched rather than half-applying the batch.
         var document = await Upload("invoice-001.txt");
 
         var response = await client.PatchAsJsonAsync(
@@ -260,8 +254,6 @@ public sealed class DocumentDetailEndpointTests : IDisposable
         Assert.Equal("Unknown file cabinet", problem!.Title);
     }
 
-    // --- the date range on the query ------------------------------------------------------------
-
     [Fact]
     public async Task A_date_range_that_covers_today_holds_what_was_just_uploaded()
     {
@@ -301,9 +293,6 @@ public sealed class DocumentDetailEndpointTests : IDisposable
     [Fact]
     public async Task A_time_zone_is_not_a_parameter_any_more_and_is_ignored()
     {
-        // Removed on request: dates are read as UTC calendar days. An unknown name in the query
-        // string is simply not bound, so the request succeeds rather than being refused — worth
-        // pinning, because a client that still sends one must not be given a 400.
         var response = await client.GetAsync(
             "/cabinets/Invoices/documents?timeZone=Mars/Olympus_Mons", Token);
 
@@ -379,8 +368,6 @@ public sealed class DocumentDetailEndpointTests : IDisposable
         var report = await response.Content.ReadFromJsonAsync<UploadReportResponse>(Token);
         var stored = report!.Results[0].DocumentId;
 
-        // The report carries part names; the routes under test need the ids, which only the
-        // document itself has.
         var page = await client.GetFromJsonAsync<DocumentPageResponse>(
             "/cabinets/Invoices/documents", Token);
 

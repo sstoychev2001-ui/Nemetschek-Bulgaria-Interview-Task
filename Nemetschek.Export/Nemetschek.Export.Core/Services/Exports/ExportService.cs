@@ -40,7 +40,7 @@ public sealed class ExportService(
 
         try
         {
-            using (var zip = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true))
+            using (var zip = new ZipArchive(destination, ZipArchiveMode.Create, true))
             {
                 var found = archive.ReadDocumentsAsync(
                     request.CabinetName, request.From, request.To, cancellationToken);
@@ -129,16 +129,6 @@ public sealed class ExportService(
     /// <summary>
     /// A name for an entry that nothing in <paramref name="taken"/> has used yet, remembering it.
     /// </summary>
-    // The brief requires two documents sharing a title to both survive, by a documented rule. The
-    // rule: the first keeps the name and each one after it gains " (n)" before the extension —
-    // invoice.txt, invoice (2).txt, invoice (3).txt — so a reader of the unpacked folder sees the
-    // original name and an obvious sequence. The counter is kept under the original name, so the
-    // nth repeat is numbered n even when " (2)" was itself an incoming name.
-    //
-    // Comparison is ordinal and case-insensitive, because the archive is unpacked on filesystems
-    // that do not agree about case: "Invoice.txt" and "invoice.txt" are two documents in the
-    // Archive but one filename on Windows and macOS. Parts inside a folder-document are named by
-    // the same call with their own table, because two parts of one document may also share a name.
     private static string GetEntryName(string name, Dictionary<string, int> taken)
     {
         var extension = Path.GetExtension(name);

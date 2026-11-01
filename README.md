@@ -3,21 +3,19 @@
 A small document archive: documents live in file cabinets, are described by typed index fields, and are
 uploaded as folders of material and exported back out as zip archives.
 
-**Current status: `compose up` brings the Archive up, uploads store durably, and the documents
-survive `down` + `up` — verified on Podman 6.1.4 via `podman compose`. The Archive serves two
-routes, an upload and a paged read. Still missing on the Archive itself: reading a part's content
-over HTTP, updating index values, the date-range filter, `GET /cabinets` and a CORS policy — the
-first two of which the Export service needs. The Export service has its six projects, its OpenAPI
-description and a liveness endpoint, but no export rules. No web client.**
-See [`DECISIONS.md`](DECISIONS.md) for exactly what is built and what is missing, and how each gap
-would be closed.
+**Current status: `compose up` brings up both services and the round trip works end to end** —
+the sample material uploaded twice, exported as a zip, unpacked, and **15 of its 16 entries
+byte-identical to the original folder**, the one difference being the nested file the upload rules
+skip by design. Verified on Podman 6.1.4 via `podman compose`. Still missing: `GET /cabinets` so a
+client can list fields, a CORS policy, and the web client itself.
+See [`DECISIONS.md`](DECISIONS.md) for exactly what is built and what is missing.
 
 ## What this will contain
 
 | Piece | Technology | Status |
 |---|---|---|
-| Archive service | ASP.NET Core 9 | Field rules, upload, durable storage, paged read, `/health` |
-| Export service | ASP.NET Core 9 | Projects scaffolded, no export rules yet |
+| Archive service | ASP.NET Core 9 | Field rules, upload, durable storage, paged read |
+| Export service | ASP.NET Core 9 | Export rules, zip layout, marker write-back |
 | Web client | TBD | Not started |
 
 The Export service never touches the Archive's storage; it only uses the Archive's HTTP API.
@@ -33,7 +31,7 @@ Nemetschek.Archive/
 ├── Nemetschek.Archive.Core/              the rules, no external dependencies
 ├── Nemetschek.Archive.Infrastructure/    adapters for storage and fixtures
 └── Nemetschek.Archive.*.Tests/           one test project per production project, offline
-Nemetschek.Export/                        the same six projects; rules not written yet
+Nemetschek.Export/                        the same six projects, same shape
 fixtures/                            cabinets.json and sample-material.zip (given)
 ```
 
@@ -43,7 +41,7 @@ fixtures/                            cabinets.json and sample-material.zip (give
 stores documents somewhere they survive a restart.
 
 ```bash
-docker compose up --build -d        # the Archive on http://localhost:8080
+docker compose up --build -d        # the Archive on :8080, the Export service on :8081
 docker compose logs -f archive-api
 docker compose down                 # keeps the data; `down -v` deletes it
 ```
@@ -142,7 +140,7 @@ Tests need no containers and run straight from the repository. Requires the .NET
 
 ```bash
 dotnet build                        # warnings are errors
-dotnet test                         # offline, no containers — 292 tests, plus 2 skipped
+dotnet test                         # offline, no containers — 389 tests
 dotnet test --collect:"XPlat Code Coverage"   # 98.9% of lines
 ```
 
@@ -160,16 +158,49 @@ Archive__StoragePath=$PWD/.archive-data \
   dotnet run --project Nemetschek.Archive/Nemetschek.Archive.Api --no-launch-profile
 ```
 
-With the service running:
+**The Archive**, on `http://localhost:8080`:
 
 | Path | Purpose |
 |---|---|
+| `GET /cabinets` | Every file cabinet with its index fields: each field's `name`, `label`, `type`, `maxLength`, `writable`, and `choosable` — whether a client may offer it as the upload field or the export marker field. Answers `{"cabinets":[{"name":"Invoices","displayName":"Invoices","fields":[…]}]}`. |
 | `POST /cabinets/{cabinetName}/uploads` | Upload a folder of material. `200` with a report; `400` if the chosen field breaks a rule; `404` for an unknown cabinet. See below. |
-| `GET /cabinets/{cabinetName}/documents` | A page of stored documents, oldest first. `?page=1&size=20`, capped by `Archive:MaxPageSize`. `404` for an unknown cabinet. |
-| `/swagger` | Browsable OpenAPI UI |
-| `/openapi/v1.json` | OpenAPI description |
-| `/health` | Liveness — is the process up. Runs no checks. |
-| `/health/ready` | Readiness — can it serve requests. This is what a dependent service waits on. |
+| `GET /cabinets/{cabinetName}/documents` | A page of stored documents, oldest first. `?page=1&size=20&from=2026-03-01&to=2026-03-31`, capped by `Archive:MaxPageSize`. The dates are inclusive calendar dates **in UTC**, filtered on `StoredAt`. |
+| `GET /cabinets/{cabinetName}/documents/{id}/parts/{partId}/content` | One part's bytes, streamed. `404` if the document or the part is not there. |
+| `PATCH /cabinets/{cabinetName}/documents/index-values` | Set the same index values on one or many documents. `{"documentIds":["…"],"values":{"Batch":{"type":"Text","value":"…"}}}`. `400` if a value breaks a field rule, `404` if the cabinet does not hold one of the ids — in both cases nothing is written. Answers `{"cabinet":"…","updated":24}`. |
+| `/swagger`, `/openapi/v1.json` | Browsable OpenAPI |
+
+**The Export service**, on `http://localhost:8081`:
+
+| Path | Purpose |
+|---|---|
+| `POST /exports` | Build a zip of a cabinet's documents and download it. Body below. `400` for a bad request or anything the Archive refused; `502` when the Archive is unreachable. |
+| `/swagger`, `/openapi/v1.json` | Browsable OpenAPI |
+
+## Exporting
+
+```bash
+curl -X POST http://localhost:8081/exports   -H "Content-Type: application/json"   -d '{"cabinet":"Invoices","markerField":"Batch","from":"2026-03-01","to":"2026-03-31"}'   -o export.zip
+```
+
+All four values are required. The reply is `application/zip` as an attachment named
+`<cabinet>-<from>-to-<to>.zip`.
+
+> **Dates are UTC calendar days.** There is no time-zone parameter: the client and the services are
+> taken to share a zone, so `from` and `to` are read as UTC days and the marker carries the UTC
+> date. A caller whose own day differs from UTC's sees UTC's boundaries — see "Removed: the time
+> zone parameter" in [`DECISIONS.md`](DECISIONS.md) for what that costs.
+
+What comes out, and why, is in [`DECISIONS.md`](DECISIONS.md). In
+short: one part becomes a file named after the **document**, several parts become a folder with one
+file per part, no parts becomes an empty folder, and a repeated title gains ` (2)` before its
+extension. Every exported document then has its chosen field set to `Exported on yyyy-MM-dd`, with
+the UTC date — the marker **records** the export rather than filtering it, so running the same
+export twice covers the same documents and overwrites their markers.
+
+> **The archive is built before it is sent.** It goes into a temp file that deletes itself, so a
+> failure is a `400` or `502` with nothing delivered rather than a `200` holding a truncated zip.
+> The caller waits for the build; memory is never the limit, because part content is streamed from
+> the Archive into the zip entry.
 
 ## Uploading a folder
 
@@ -264,7 +295,7 @@ Three notes a caller has to know:
 docker compose up --build
 ```
 
-The Archive is then on `http://localhost:8080` (change with `ARCHIVE_PORT` in `.env`).
+The Archive is then on `http://localhost:8080` (change the published port in `docker-compose.yml`).
 `./fixtures` is mounted read-only at `/app/fixtures`, so `cabinets.json` is **not** baked into the
 image and the same image runs with a different cabinet set.
 
@@ -337,7 +368,7 @@ Under Docker Desktop on Windows the same reasoning applies — the volume lives 
 compose itself:
 
 ```
-compose up --build -d  ->  container healthy, /health/ready 200
+compose up --build -d  ->  container up, the service answering
 upload sample material ->  200, entries Stored and Skipped
 compose down           ->  container removed, named volume kept
 compose up -d          ->  same documents, same parts, same order
@@ -347,7 +378,6 @@ Also checked there:
 
 - The container runs as `uid=1654(app)` and the named volume is owned by `app`, so the Dockerfile's
   `mkdir`/`chown` before `USER $APP_UID` is doing its job.
-- The compose `healthcheck` reports **healthy**, which exercises the `curl` installed in the image.
 - All five `Archive__*` variables bind — confirmed by setting `Archive__MaxPageSize=5` and getting
   a page of 5 — and the service refuses to start when either required path is absent.
 - The refusal statuses: `404` unknown cabinet, `400` read-only field, `400` folder name too long.
@@ -371,6 +401,7 @@ in the volume today are from an upload after that reinstall, not the original tw
 | `Archive:MaxUploadBytes` | Archive | Largest upload body accepted, in bytes. Default 268435456 (256 MiB). |
 | `Archive:MaxUploadEntries` | Archive | Most parts accepted in one multipart body. Default 10000. |
 | `Archive:MaxPageSize` | Archive | Most documents one page may hold. Default 50; the review demo runs with 5. |
+| `Export:ArchiveBaseAddress` | Export | **Required.** The Archive's HTTP base address, such as `http://archive-api:8080`. The service refuses to start without it, and refuses an address that is not absolute. There is no default on purpose: the Export reaches the Archive over HTTP and nothing else, so a wrong or missing address has to fail at startup rather than at the first export. |
 
 Every setting can be supplied as an environment variable using ASP.NET Core's double-underscore form,
 so the same image runs with different settings:
@@ -380,14 +411,18 @@ Archive__CabinetsFile=/app/fixtures/cabinets.json
 Archive__StoragePath=/var/lib/archive
 ```
 
-`docker-compose.yml` supplies every one of these, with the tunable ones defaulted in `.env`:
+`docker-compose.yml` supplies every one of these, literally — there is no `.env` and no
+`docker-compose.override.yml`, so one file is the whole deployment and what runs is what you read.
+They are still environment variables, which is what lets the same images run with different ones:
 
-| `.env` variable | Sets |
-|---|---|
-| `ARCHIVE_PORT` | The published host port |
-| `ARCHIVE_MAX_PAGE_SIZE` | `Archive:MaxPageSize` — **set this to 5 for the review demo** |
-| `ARCHIVE_MAX_UPLOAD_BYTES` | `Archive:MaxUploadBytes` |
-| `ARCHIVE_MAX_UPLOAD_ENTRIES` | `Archive:MaxUploadEntries` |
+```bash
+# the review demo, without editing the file
+docker compose run -e Archive__MaxPageSize=5 archive-api
+```
+
+**`name: nemetschek-archive` at the top of the file is load-bearing.** It prefixes the volume
+(`nemetschek-archive_archive-data`); without it Compose names the project after the directory, and
+the Archive would come up pointing at a different, empty volume.
 
 Neither path is defaulted in `appsettings.Development.json`, on purpose: a relative path there
 would resolve against the **content root** — `/app` inside the image — so a deployment that forgot
@@ -402,8 +437,12 @@ Loaded cabinet definitions from /app/fixtures/cabinets.json
 Storing documents under /var/lib/archive
 ```
 
-No credentials are baked into any image or committed to this repository. `.env` currently holds only
-`COMPOSE_PROJECT_NAME`.
+No credentials are baked into any image or committed to this repository, and there is no `.env`
+for one to hide in.
+
+**The Export service is given the Archive by service name**, `http://archive-api:8080`, which is the
+compose network's own DNS. It never sees the Archive's volume: the only way in is the three routes
+above, which is the boundary the brief requires and the architecture tests enforce.
 
 ## What the container log holds
 
@@ -421,11 +460,45 @@ A storage failure is logged at `Error` with its exception. That matters because 
 turns a failed document into a `Failed` row and still answers `200` — so the log is the only place a
 volume that has stopped accepting writes shows up.
 
-Two deliberate omissions. **Request and response bodies and headers are never logged**: an upload
+One deliberate omission: **request and response bodies and headers are never logged**: an upload
 body is untrusted and may be 256 MiB, and a header is where a credential would appear once there is
-one. **The health probe is not logged**, or the ten-second readiness check would be all the log
-holds; set `Microsoft.AspNetCore` to `Information` in `appsettings.json` if you want the framework's
+one. Set `Microsoft.AspNetCore` to `Information` in `appsettings.json` if you want the framework's
 own per-request detail back.
+
+## The round trip
+
+The brief's demo: upload the shared sample material twice, export it, unpack the archive, and
+account for every difference. Run on 2026-10-30 against both containers.
+
+```bash
+# twice, so duplicate titles have to be dealt with
+python upload-sample-material.py          # the recipe is in "Uploading a folder" above
+python upload-sample-material.py
+
+TODAY=$(date -u +%Y-%m-%d)
+curl -X POST http://localhost:8081/exports -H "Content-Type: application/json"   -d "{\"cabinet\":\"Invoices\",\"markerField\":\"Batch\",\"from\":\"$TODAY\",\"to\":\"$TODAY\"}"   -o export.zip
+```
+
+**Result: 24 documents in, 30 entries out, and 15 of the original folder's 16 entries byte-identical
+by SHA-256.** One difference, and it is a rule:
+
+| Difference | Reason |
+|---|---|
+| `delivery-2026-03/archive/old-page.txt` is absent | Nested more than one folder deep, so the **upload** never stored it. The upload report said `Skipped` with that reason at the time; the export can only hold what the Archive holds |
+
+Everything else matched, including the cases the fixtures exist to break:
+
+- `Договор София.txt` and `Фактури Q1/фактура-1.txt` — Cyrillic names, unchanged;
+- `readme with spaces.txt` — spaces, unchanged;
+- `empty-note.txt` — zero bytes, still zero bytes, and still a *file*;
+- `empty-folder/` — no parts, still an empty folder, and told apart from the zero-byte file;
+- `delivery-2026-03/` — three parts in `page1, page10, page2` order, the Archive's ordinal order;
+- the second upload's twelve documents came out as ` (2)`: `invoice-001 (2).txt`,
+  `delivery-2026-03 (2)/`, `empty-folder (2)/`, `Договор София (2).txt`.
+
+Afterwards, all 24 exported documents carried `Batch = Exported on 2026-10-30`, and the 11
+documents stored on the previous day — outside the range — were neither exported nor marked, which
+is the date filter working against real stored data rather than a test fixture.
 
 ## The sample material
 
@@ -441,5 +514,6 @@ On Linux, extract with `7z`, `bsdtar` or `python3 -m zipfile -e sample-material.
 
 - [`TASK.md`](TASK.md) — the original brief (authoritative)
 - [`AGENTS.md`](AGENTS.md) — layout, where the rules live, conventions, how to add an operation
-- [`DECISIONS.md`](DECISIONS.md) — key decisions, what is missing, AI notes, time log
-- [`docs/upload-requirements.md`](docs/upload-requirements.md) — the upload rules in plain terms
+- [`DECISIONS.md`](DECISIONS.md) — key decisions, what is missing, AI notes, time log, and the
+  upload and export rules in plain terms
+- [`CLAUDE.md`](CLAUDE.md) — the standing instruction for sessions in this folder

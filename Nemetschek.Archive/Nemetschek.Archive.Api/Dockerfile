@@ -15,10 +15,6 @@ RUN dotnet publish Nemetschek.Archive/Nemetschek.Archive.Api -c Release -o /app 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
 WORKDIR /app
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends curl \
- && rm -rf /var/lib/apt/lists/*
-
 COPY --from=build /app .
 
 RUN mkdir -p /var/lib/archive && chown -R $APP_UID /var/lib/archive

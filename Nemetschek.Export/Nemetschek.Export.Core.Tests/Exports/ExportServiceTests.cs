@@ -164,8 +164,6 @@ public sealed class ExportServiceTests
     [Fact]
     public async Task The_markers_date_is_the_export_date_in_UTC()
     {
-        // 23:30 UTC on the 1st is the 1st, whatever the caller's own clock says. There is no time
-        // zone to read it in any more — see "Removed: the time zone parameter" in DECISIONS.md.
         archive.Add("a.txt", "a.pdf");
 
         await Run();
@@ -188,9 +186,6 @@ public sealed class ExportServiceTests
     [Fact]
     public async Task Nothing_is_marked_until_the_whole_archive_is_built()
     {
-        // The marker claims a document was exported, so it must not be written for one the caller
-        // never receives. Marking once at the end makes that true of the whole export rather than
-        // of each document in turn: a failure partway leaves nothing marked.
         var failing = new FakeArchive { FailOpeningPart = new IOException("the part is gone") };
         failing.Add("first.txt", "a.pdf");
         failing.Add("second.txt", "b.pdf");
@@ -251,8 +246,6 @@ public sealed class ExportServiceTests
     [Fact]
     public async Task A_failed_export_leaves_no_file_behind()
     {
-        // The stream is what deletes the temp file when it closes, and a failed export returns no
-        // stream — so the service has to close it itself.
         var failing = new FakeArchive { FailOpeningPart = new IOException("the part is gone") };
         failing.Add("a.txt", "a.pdf");
         var before = Directory.GetFiles(Path.GetTempPath(), "export-*.zip").Length;

@@ -1,106 +1,20 @@
 using Microsoft.AspNetCore.Mvc;
-using Nemetschek.Archive.Api.Contracts.Documents.Mappings;
-using Nemetschek.Archive.Api.Contracts.Documents.Requests;
-using Nemetschek.Archive.Api.Contracts.Documents.Responses;
-using Nemetschek.Archive.Api.Contracts.Shared;
-using Nemetschek.Archive.Api.Contracts.Uploads.Mappings;
-using Nemetschek.Archive.Api.Contracts.Uploads.Requests;
-using Nemetschek.Archive.Api.Contracts.Uploads.Responses;
-using Nemetschek.Archive.Core.Services.Documents;
-using Nemetschek.Archive.Core.Services.Uploads;
-using Nemetschek.Archive.Core.Validation.Documents;
+using Nemetschek.Archive.Api.Contracts.Cabinets.Mappings;
+using Nemetschek.Archive.Api.Contracts.Cabinets.Responses;
+using Nemetschek.Archive.Core.Services.Interfaces.Cabinets;
 
 namespace Nemetschek.Archive.Api.Controllers;
 
 /// <summary>
-/// The file cabinets and what goes into them.
+/// The file cabinets the Archive was deployed with, and the index fields of each.
 /// </summary>
 [ApiController]
 [Route("cabinets")]
 [Produces("application/json")]
-public sealed class CabinetsController(
-    UploadService uploadService,
-    DocumentsService documentsService,
-    PagingLimits paging) : ControllerBase
+public sealed class CabinetsController(ICabinetCatalog cabinets) : ControllerBase
 {
-    /// <summary>Uploads a folder of material into a file cabinet.</summary>
-    /// <param name="cabinetName">The technical name of the file cabinet, such as <c>Invoices</c>.</param>
-    /// <param name="form">The chosen index field, the folder's name, and its contents.</param>
-    /// <param name="cancellationToken">Cancels the upload if the caller goes away.</param>
-    [HttpPost("{cabinetName}/uploads")]
-    [Consumes("multipart/form-data")]
-    [ProducesResponseType<UploadReportResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<UploadReportResponse> Upload(
-        string cabinetName,
-        [FromForm] UploadFormRequest form,
-        CancellationToken cancellationToken)
-    {
-        return (await uploadService.UploadAsync(
-            form.ToUploadRequest(cabinetName), cancellationToken)).ToResponse();
-    }
-
-    /// <summary>Reads a page of the documents stored in a file cabinet, oldest first.</summary>
-    /// <param name="cabinetName">The technical name of the file cabinet, such as <c>Invoices</c>.</param>
-    /// <param name="query">Which page to read, how large it should be, and over which dates.</param>
-    /// <param name="cancellationToken">Cancels the read if the caller goes away.</param>
-    [HttpGet("{cabinetName}/documents")]
-    [ProducesResponseType<DocumentPageResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<DocumentPageResponse> Documents(
-        string cabinetName,
-        [FromQuery] DocumentPageRequest query,
-        CancellationToken cancellationToken)
-    {
-        var page = await documentsService.ListAsync(
-            cabinetName,
-            CalendarRange.Of(query.From, query.To),
-            query.Skip(paging.MaxPageSize),
-            query.Take(paging.MaxPageSize),
-            cancellationToken);
-
-        return page.ToResponse(cabinetName, query.Page, query.Take(paging.MaxPageSize));
-    }
-
-    /// <summary>Reads the content of one part of one stored document.</summary>
-    /// <param name="cabinetName">The technical name of the file cabinet.</param>
-    /// <param name="documentId">The Archive's identifier for the document.</param>
-    /// <param name="partId">The Archive's identifier for the part.</param>
-    /// <param name="cancellationToken">Cancels the read if the caller goes away.</param>
-    [HttpGet("{cabinetName}/documents/{documentId:guid}/parts/{partId:guid}/content")]
-    [Produces("application/octet-stream")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<FileStreamResult> PartContent(
-        string cabinetName,
-        Guid documentId,
-        Guid partId,
-        CancellationToken cancellationToken)
-    {
-        var content = await documentsService.OpenPartAsync(
-            cabinetName, documentId, partId, cancellationToken);
-
-        return File(content, "application/octet-stream");
-    }
-
-    /// <summary>Sets the same index values on several stored documents of one file cabinet.</summary>
-    /// <param name="cabinetName">The technical name of the file cabinet.</param>
-    /// <param name="request">The documents to change, and the values to set on each of them.</param>
-    /// <param name="cancellationToken">Cancels the write if the caller goes away.</param>
-    [HttpPatch("{cabinetName}/documents/index-values")]
-    [ProducesResponseType<IndexValuesUpdatedResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<IndexValuesUpdatedResponse> SetIndexValues(
-        string cabinetName,
-        [FromBody] IndexValuesBatchRequest request,
-        CancellationToken cancellationToken)
-    {
-        var updated = await documentsService.SetIndexValuesAsync(
-            cabinetName, request.DocumentIds, request.ToIndexValues(), cancellationToken);
-
-        return new IndexValuesUpdatedResponse(cabinetName, updated);
-    }
+    /// <summary>Lists every file cabinet with its index fields.</summary>
+    [HttpGet]
+    [ProducesResponseType<CabinetsResponse>(StatusCodes.Status200OK)]
+    public CabinetsResponse Cabinets() => cabinets.All.ToResponse();
 }

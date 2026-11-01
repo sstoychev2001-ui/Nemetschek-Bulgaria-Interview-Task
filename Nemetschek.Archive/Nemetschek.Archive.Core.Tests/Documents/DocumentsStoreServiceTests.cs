@@ -22,9 +22,9 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     /// <summary>A store on a prepared, empty storage root.</summary>
     private DocumentsStoreService Store()
     {
-        DocumentsStoreService.Prepare(root);
+        new DocumentStorageRoot(root).Prepare();
 
-        return new DocumentsStoreService(root, clock, logger);
+        return new DocumentsStoreService(new DocumentStorageRoot(root), clock, logger);
     }
 
     [Fact]
@@ -160,7 +160,14 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     {
         var store = Store();
         await store.AddAsync(
-            Document.ToStore("Invoices", "empty-folder", Values(), []), CancellationToken.None);
+            new Document
+            {
+                CabinetName = "Invoices",
+                Title = "empty-folder",
+                IndexValues = Values(),
+                Parts = [],
+            },
+            CancellationToken.None);
 
         var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
 
@@ -182,12 +189,18 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     {
         var store = Store();
         await store.AddAsync(
-            Document.ToStore("Invoices", "delivery", Values(),
-            [
-                Part.ToStore("page1.txt", Content),
-                Part.ToStore("page10.txt", Content),
-                Part.ToStore("page2.txt", Content),
-            ]),
+            new Document
+            {
+                CabinetName = "Invoices",
+                Title = "delivery",
+                IndexValues = Values(),
+                Parts =
+                [
+                    Part.ToStore("page1.txt", Content),
+                    Part.ToStore("page10.txt", Content),
+                    Part.ToStore("page2.txt", Content),
+                ],
+            },
             CancellationToken.None);
 
         var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
@@ -219,7 +232,14 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         {
             clock.Now = new DateTimeOffset(2026, day, 1, 0, 0, 0, TimeSpan.Zero);
             await store.AddAsync(
-                Document.ToStore("Invoices", title, Values(), []), CancellationToken.None);
+                new Document
+                {
+                    CabinetName = "Invoices",
+                    Title = title,
+                    IndexValues = Values(),
+                    Parts = [],
+                },
+                CancellationToken.None);
         }
 
         var page = await store.ListAsync("Invoices", StoredRange.All, 0, 10, CancellationToken.None);
@@ -244,7 +264,14 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         {
             clock.Now = clock.Now.AddMinutes(1);
             await store.AddAsync(
-                Document.ToStore("Invoices", title, Values(), []), CancellationToken.None);
+                new Document
+                {
+                    CabinetName = "Invoices",
+                    Title = title,
+                    IndexValues = Values(),
+                    Parts = [],
+                },
+                CancellationToken.None);
         }
 
         var page = await store.ListAsync("Invoices", StoredRange.All, skip, take, CancellationToken.None);
@@ -267,9 +294,23 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     {
         var store = Store();
         await store.AddAsync(
-            Document.ToStore("Invoices", "invoice", Values(), []), CancellationToken.None);
+            new Document
+            {
+                CabinetName = "Invoices",
+                Title = "invoice",
+                IndexValues = Values(),
+                Parts = [],
+            },
+            CancellationToken.None);
         await store.AddAsync(
-            Document.ToStore("Contracts", "contract", Values(), []), CancellationToken.None);
+            new Document
+            {
+                CabinetName = "Contracts",
+                Title = "contract",
+                IndexValues = Values(),
+                Parts = [],
+            },
+            CancellationToken.None);
 
         Assert.Equal(
             "invoice",
@@ -294,39 +335,14 @@ public sealed class DocumentsStoreServiceTests : IDisposable
             () => store.ListAsync(cabinetName, StoredRange.All, 0, 10, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(
             () => store.AddAsync(
-                Document.ToStore(cabinetName, "title", Values(), []), CancellationToken.None));
-    }
-
-    [Fact]
-    public void Prepare_creates_the_directories_the_store_and_the_probe_need()
-    {
-        DocumentsStoreService.Prepare(root);
-
-        Assert.True(Directory.Exists(Path.Combine(root, "cabinets")));
-        Assert.True(Directory.Exists(Path.Combine(root, "tmp")));
-    }
-
-    [Fact]
-    public void Prepare_clears_a_staging_directory_left_by_an_upload_that_died()
-    {
-        DocumentsStoreService.Prepare(root);
-        Directory.CreateDirectory(Path.Combine(root, "tmp", "abandoned"));
-
-        DocumentsStoreService.Prepare(root);
-
-        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(root, "tmp")));
-    }
-
-    [Fact]
-    public void Prepare_keeps_the_documents_already_stored()
-    {
-        DocumentsStoreService.Prepare(root);
-        var kept = Path.Combine(root, "cabinets", "Invoices");
-        Directory.CreateDirectory(kept);
-
-        DocumentsStoreService.Prepare(root);
-
-        Assert.True(Directory.Exists(kept));
+                new Document
+                {
+                    CabinetName = cabinetName,
+                    Title = "title",
+                    IndexValues = Values(),
+                    Parts = [],
+                },
+                CancellationToken.None));
     }
 
     [Fact]
@@ -338,37 +354,6 @@ public sealed class DocumentsStoreServiceTests : IDisposable
             () => store.AddAsync(Draft(new Part { Name = "page1.txt" }), CancellationToken.None));
 
         Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(root, "tmp")));
-    }
-
-    [Fact]
-    public void A_prepared_root_is_writable()
-    {
-        Assert.True(Store().CanWrite());
-    }
-
-    [Fact]
-    public void A_root_whose_staging_directory_is_gone_is_not_writable()
-    {
-        var store = Store();
-        Directory.Delete(Path.Combine(root, "tmp"), recursive: true);
-
-        Assert.False(store.CanWrite());
-    }
-
-    [Fact]
-    public void The_probe_leaves_nothing_behind()
-    {
-        var store = Store();
-
-        Assert.True(store.CanWrite());
-
-        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(root, "tmp")));
-    }
-
-    [Fact]
-    public void The_root_is_the_path_the_store_was_given()
-    {
-        Assert.Equal(root, Store().Root);
     }
 
     public void Dispose()
@@ -391,7 +376,13 @@ public sealed class DocumentsStoreServiceTests : IDisposable
         };
 
     private static Document Draft(Part part) =>
-        Document.ToStore("Invoices", "invoice-001.txt", Values(), [part]);
+        new()
+        {
+            CabinetName = "Invoices",
+            Title = "invoice-001.txt",
+            IndexValues = Values(),
+            Parts = [part],
+        };
 
     /// <summary>A clock the test moves on purpose, so ordering and paging are not timing-dependent.</summary>
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider

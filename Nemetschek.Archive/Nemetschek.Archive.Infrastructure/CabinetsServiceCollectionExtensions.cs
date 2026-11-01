@@ -1,8 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Nemetschek.Archive.Infrastructure.Cabinets;
-using Nemetschek.Archive.Infrastructure.Health;
 using Nemetschek.Archive.Core.Services.Interfaces.Cabinets;
-
 using Nemetschek.Archive.Core.Services.Cabinets;
 
 namespace Nemetschek.Archive.Infrastructure;
@@ -35,7 +33,6 @@ public static class CabinetsServiceCollectionExtensions
         var catalog = new CabinetCatalog(CabinetsFileLoader.Load(resolved));
 
         services.AddSingleton<ICabinetCatalog>(catalog);
-        services.AddHealthChecks().AddCheck<CabinetCatalogHealthCheck>("cabinets", tags: ["ready"]);
 
         return services;
     }

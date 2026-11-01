@@ -1,3 +1,4 @@
+using Nemetschek.Archive.Core.Domain.Cabinets;
 using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Core.Exceptions.Cabinets;
@@ -40,13 +41,9 @@ public sealed class DocumentsService(ICabinetCatalog cabinets, IDocumentStore do
         string cabinetName,
         Guid documentId,
         Guid partId,
-        CancellationToken cancellationToken)
-    {
-        var cabinet = cabinets.Find(cabinetName) ?? throw new UnknownCabinetException(cabinetName);
-
-        return await documents.OpenPartAsync(cabinet.Name, documentId, partId, cancellationToken)
-               ?? throw new DocumentNotFoundException(cabinet.Name, documentId, partId);
-    }
+        CancellationToken cancellationToken) =>
+        await documents.OpenPartAsync(
+            Found(cabinetName).Name, documentId, partId, cancellationToken);
 
     /// <summary>
     /// Sets the same index values on several stored documents and returns how many were changed.
@@ -63,41 +60,28 @@ public sealed class DocumentsService(ICabinetCatalog cabinets, IDocumentStore do
         IReadOnlyDictionary<string, IndexValue> values,
         CancellationToken cancellationToken)
     {
-        var cabinet = cabinets.Find(cabinetName) ?? throw new UnknownCabinetException(cabinetName);
+        var cabinet = Found(cabinetName);
 
-        var refusals = values
-            .Select(value => IndexFieldRules.ValidateWrite(cabinet, value.Key, value.Value))
-            .OfType<FieldViolation>()
-            .Select(violation => violation.Reason)
-            .ToList();
-
-        if (refusals.Count > 0)
+        if (IndexFieldRules.ValidateWrites(cabinet, values) is { Count: > 0 } refusals)
         {
             throw new IndexValueRefusedException(refusals);
         }
 
-        // Every document is resolved before any of them is written. There is no transaction
-        // spanning documents, so the one failure worth ruling out up front is the one a caller
-        // causes: an id the cabinet does not hold. It costs a second pass over the directory names,
-        // which is the price of not leaving half a batch applied.
         foreach (var documentId in documentIds)
         {
-            if (await documents.FindAsync(cabinet.Name, documentId, cancellationToken) is null)
-            {
-                throw new DocumentNotFoundException(cabinet.Name, documentId);
-            }
+            await documents.FindAsync(cabinet.Name, documentId, cancellationToken);
         }
 
-        var updated = 0;
         foreach (var documentId in documentIds)
         {
-            if (await documents.SetIndexValuesAsync(
-                    cabinet.Name, documentId, values, cancellationToken) is not null)
-            {
-                updated++;
-            }
+            await documents.SetIndexValuesAsync(cabinet.Name, documentId, values, cancellationToken);
         }
 
-        return updated;
+        return documentIds.Count;
     }
+
+    /// <summary>The cabinet a request names.</summary>
+    /// <exception cref="UnknownCabinetException">There is no such file cabinet.</exception>
+    private Cabinet Found(string cabinetName) =>
+        cabinets.Find(cabinetName) ?? throw new UnknownCabinetException(cabinetName);
 }

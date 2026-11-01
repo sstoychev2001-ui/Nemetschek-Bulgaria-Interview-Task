@@ -1,5 +1,6 @@
 using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
+using Nemetschek.Archive.Core.Exceptions.Documents;
 
 namespace Nemetschek.Archive.Core.Services.Interfaces.Documents;
 
@@ -31,27 +32,24 @@ public interface IDocumentStore
         int take,
         CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Reads one document by id, or <c>null</c> when the cabinet does not hold it.
-    /// </summary>
-    Task<Document?> FindAsync(string cabinetName, Guid documentId, CancellationToken cancellationToken);
+    /// <summary>Reads one document by id.</summary>
+    /// <exception cref="DocumentNotFoundException">The cabinet does not hold it.</exception>
+    Task<Document> FindAsync(string cabinetName, Guid documentId, CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Opens a part's content for reading. The caller disposes the stream. Returns <c>null</c> when
-    /// the document or the part is not there.
-    /// </summary>
-    Task<Stream?> OpenPartAsync(
+    /// <summary>Opens a part's content for reading. The caller disposes the stream.</summary>
+    /// <exception cref="DocumentNotFoundException">There is no such document, or no such part.</exception>
+    Task<Stream> OpenPartAsync(
         string cabinetName,
         Guid documentId,
         Guid partId,
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Replaces the named index values of a stored document and returns it as it now stands. Values
-    /// that are not named are left alone, and <see cref="Document.ModifiedAt"/> is the Archive's to
-    /// set. Returns <c>null</c> when the cabinet does not hold the document.
+    /// Replaces the named index values of a stored document. Values that are not named are left
+    /// alone, and <see cref="Document.ModifiedAt"/> is the Archive's to set.
     /// </summary>
-    Task<Document?> SetIndexValuesAsync(
+    /// <exception cref="DocumentNotFoundException">The cabinet does not hold it.</exception>
+    Task SetIndexValuesAsync(
         string cabinetName,
         Guid documentId,
         IReadOnlyDictionary<string, IndexValue> values,

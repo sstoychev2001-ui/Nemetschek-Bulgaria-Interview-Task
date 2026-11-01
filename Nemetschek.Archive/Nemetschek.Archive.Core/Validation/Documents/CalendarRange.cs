@@ -6,10 +6,6 @@ namespace Nemetschek.Archive.Core.Validation.Documents;
 /// <summary>
 /// Reads a from-date and a to-date as calendar dates, both inclusive, in UTC.
 /// </summary>
-// The dates carry no clock time, so a zone has to be chosen to compare them against StoredAt, and
-// that zone is UTC. A caller whose own day differs from the UTC day therefore sees UTC's boundaries
-// rather than their own — the trade is recorded under "Rejected: a per-request time zone" in
-// DECISIONS.md, together with what it costs.
 public static class CalendarRange
 {
     /// <summary>

@@ -25,23 +25,20 @@ public sealed class ArchiveHttpClient(HttpClient http)
         var page = await ReadDocumentPageAsync(cabinetName, from, to, number, cancellationToken);
         var read = 0;
 
-        foreach (var document in page.Documents)
+        while (page.Documents.Count > 0)
         {
-            read++;
-
-            yield return document.ToDocument();
-        }
-
-        while (read < page.Total && page.Documents.Count > 0)
-        {
-            page = await ReadDocumentPageAsync(cabinetName, from, to, ++number, cancellationToken);
-
             foreach (var document in page.Documents)
             {
                 read++;
-
                 yield return document.ToDocument();
             }
+
+            if (read >= page.Total)
+            {
+                break;
+            }
+
+            page = await ReadDocumentPageAsync(cabinetName, from, to, ++number, cancellationToken);
         }
     }
 

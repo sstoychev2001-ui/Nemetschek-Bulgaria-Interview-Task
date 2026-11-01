@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.Mvc;
@@ -61,9 +60,7 @@ var app = builder.Build();
 app.Logger.LogInformation("Loaded cabinet definitions from {CabinetsFile}", resolvedCabinetsFile);
 app.Logger.LogInformation("Storing documents under {StoragePath}", resolvedStoragePath);
 
-app.UseWhen(
-    context => !context.Request.Path.StartsWithSegments("/health"),
-    requests => requests.UseHttpLogging());
+app.UseHttpLogging();
 
 app.UseExceptionHandler();
 app.UseMiddleware<ArchiveExceptionMiddleware>();
@@ -72,11 +69,5 @@ app.MapOpenApi();
 app.UseSwaggerUI(options => options.SwaggerEndpoint("/openapi/v1.json", "Archive API v1"));
 
 app.MapControllers();
-
-app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
-app.MapHealthChecks("/health/ready", new HealthCheckOptions
-{
-    Predicate = check => check.Tags.Contains("ready"),
-});
 
 app.Run();

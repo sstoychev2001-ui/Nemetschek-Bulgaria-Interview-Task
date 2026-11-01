@@ -31,8 +31,8 @@ Each decision in the form "A, because B". Updated as the work progresses.
   document is committed whole or not at all, the system fields are the Archive's, nothing in-flight
   survives a restart, and a page is ordered oldest-first. Those are the brief's requirements, and
   separating them from the `Directory.Move` that delivers them split one decision across two
-  projects. `Infrastructure` keeps what belongs to the deployment: the dependency registrations, the
-  health checks, and the loader for the `cabinets.json` the deployment mounts.
+  projects. `Infrastructure` keeps what belongs to the deployment: the dependency registrations and
+  the loader for the `cabinets.json` the deployment mounts.
 
   Checked before moving, because it would have been a bad surprise: the store uses only
   shared-framework types (`System.IO`, `System.Text.Json`, `System.Text.Encodings.Web`), so `Core`
@@ -135,15 +135,215 @@ Created on 2026-10-30, projects only — no export rule is implemented.
   statements compile to an internal `Program`, and `WebApplicationFactory<Program>` has to see it to
   boot the service in process. The Archive needs no equivalent: it names its public
   `CabinetsController` as the entry-point type instead, and the Export has no public type yet.
-- **The scaffold already serves OpenAPI and liveness, because** both are acceptance criteria for
-  *every* service, and four tests that boot the real host are what prove a new project is wired up
-  rather than merely compiling. Readiness was deliberately left out: it has to mean "the Archive is
-  reachable", and a `/health/ready` that answers healthy without checking anything would be worse
-  than none — a dependent service would wait on a lie. `No_readiness_endpoint_is_published_yet`
-  pins that until the client exists.
+- **The scaffold already served OpenAPI and liveness, because** OpenAPI is an acceptance criterion
+  for *every* service, and tests that boot the real host are what prove a new project is wired up
+  rather than merely compiling. Readiness was deliberately left out of the scaffold — it has to mean
+  "the Archive is reachable", and one that answers healthy without checking anything would let a
+  dependent service wait on a lie — then added with the client, then removed with all the other
+  health checking on 2026-10-31. The OpenAPI test is what remains of that argument.
 - Not done, and knowingly: no `Dockerfile`, no compose service, and no settings for the Archive's
   base address. One `docker compose up` must eventually start both; today it starts the Archive
   only.
+
+## The Export service
+
+Built on 2026-10-30. "The Export service" in `DECISIONS.md` is the rule-by-rule reading; these are the
+decisions behind it.
+
+- **Three routes were added to the Archive first, because** the Export may only reach the Archive
+  over HTTP and none of them existed: a date-range filter on the query, a part's content, and a
+  write of index values. This was named as an Export blocker in the audit earlier the same day, so
+  it was built before the Export rather than worked around. They are the Archive's public API, not a
+  private channel — a web client needs the same three.
+- **The date range is a half-open window of UTC instants, built from two calendar dates and a time
+  zone, because** "both inclusive, as the user means them" is a statement about the user's calendar,
+  not about UTC. `CalendarRange.Of` reads the from-date's midnight and the day *after* the to-date's
+  midnight in the caller's zone, so the to-date is covered in full. Tested across the March
+  daylight-saving change, where the window's start is read at +2 and its end at +3.
+- **The document directory's name is the index for the filter, because** it already carries the
+  exact instant (`yyyyMMddTHHmmssfffZ_<id>`). A day directory outside the window is skipped without
+  opening a file, and a document inside one is accepted or rejected by parsing its name — so a range
+  query reads metadata only for the page it returns.
+- **Finding one document by id is a scan of directory names, because** there is no id index and
+  adding one would be a second structure to keep consistent with the first. A v7 id carries its own
+  timestamp, so the scan can be narrowed to one day if a cabinet ever grows enough to care. Written
+  down rather than optimised now.
+- **Index values are validated in full before anything is written, because** a partial write would
+  leave a document half-updated with no way to tell. `IndexFieldRules.ValidateWrites` judges every
+  value and returns a violation per refused field, so a caller setting three fields hears about all
+  three rather than fixing them one request at a time;
+  `DocumentsService.SetIndexValuesAsync` throws `IndexValueRefusedException` with the lot.
+- **The field rules stay in `Core`, not on the request DTO, because** they need the cabinet — which
+  is a route value the body does not carry — and the upload path applies the same
+  `IndexFieldRules`. Asked on 2026-10-30 whether a DTO validator could do it instead; the answer is
+  that the DTO already does the half it can. `IndexValuesBatchRequest` and `IndexValueRequest` check
+  the shape (at least one id, at least one value, and whether the text parses as the type it
+  claims), and `IndexFieldRules` checks the rules (does the field exist, is it writable, does the
+  type match, does the value fit). Moving the second half into the Api would put a business rule in
+  the HTTP layer, duplicate it for the upload, and answer with the framework's
+  `ValidationProblemDetails` instead of the documented shape. What *did* move is the collecting
+  itself: the twelve lines of LINQ that used to sit in the service are now `ValidateWrites`, beside
+  the singular rule it is built from.
+- **`document.json` is replaced by staging plus one `File.Move(overwrite: true)`, because** that is
+  the same atomic-rename property `AddAsync` already relies on: a reader sees the old document or
+  the new one, never a half-written file.
+- **The naming rule and the marker's wording live in `ExportService` as `GetEntryName` and
+  `GetMarker`, not in classes of their own, because** each was one expression with one caller inside
+  one service — `ZipEntryNames` existed only to hold a dictionary the caller can pass in, and
+  `ExportMarker` only to hold an interpolated string. Folded in on request on 2026-10-30; the
+  behaviour is unchanged, which the duplicate-naming and marker tests confirm by asserting through
+  `WriteAsync` rather than against the helpers. `GetEntryName` taking the table of used names is
+  what lets one method serve both uses — document titles across the whole archive, and part names
+  inside a single folder-document.
+- **The duplicate-title rule is ` (n)` before the extension, compared case-insensitively, because**
+  a reader of the unpacked folder should see the original name and an obvious sequence — and because
+  `Invoice.txt` and `invoice.txt` are two documents in the Archive but one filename on Windows and
+  macOS. The same rule runs again for parts inside a folder-document.
+- **The marker is written after the document's entries, because** it claims the document was
+  exported; writing it first would mark a document the caller never receives. Tested by making a
+  part unreadable and asserting nothing was marked.
+- **The marker's date is read in the caller's time zone, because** an export running at 23:30 UTC is
+  already tomorrow for a caller in Sofia, and the marker is for them to read.
+- **`ExportService.WriteAsync` returns the finished archive as a readable stream rather than taking
+  a destination to write into, because** the caller then has nothing to decide: the endpoint sends
+  what it is given and the service owns where an archive is staged. Changed on request on
+  2026-10-30, having first been written the other way round. Two consequences worth naming. The
+  stream's lifetime is now the caller's — `FileStreamResult` disposes it after sending, which is
+  what deletes the file — so a **failed** export has to dispose it itself, since nothing else will;
+  that is `A_failed_export_leaves_no_file_behind`. And the counts the method used to return are now
+  only in its log line, so `ExportReport` had no producer left and was deleted rather than left as
+  dead code; the tests that asserted it now assert the zip's own entries and the markers written,
+  which is the observable result rather than a reported number.
+- **The archive is built into a temp file and then sent, rather than streamed into the response.**
+  Two reasons, and the first was found by a test rather than by reasoning: `ZipArchive` writes
+  **synchronously**, and ASP.NET Core refuses synchronous writes to the response body — the endpoint
+  test failed with "Synchronous operations are disallowed" before any container ran. Streaming would
+  therefore need `AllowSynchronousIO`, which ties up a thread for as long as the caller's socket
+  takes. The second reason is better: building first means a failure is still a `400` or `502` with
+  nothing delivered, instead of a `200` holding a truncated zip. The file is opened `DeleteOnClose`,
+  holds one export, and never involves memory — part content is streamed from the Archive into the
+  zip entry either way, which is the requirement that mattered. The cost is that the caller waits
+  for the build and the host needs disk for one export.
+- **The client asks the Archive for `size=int.MaxValue` and lets it cap, because** the Archive's
+  maximum is the Archive's business; asking for its maximum is asking for whatever it allows. It
+  pages until a page comes back empty. The review demo runs that cap at 5, so the paging is real
+  rather than decorative.
+- **The Archive client has no request timeout, because** an export streams for as long as its
+  content takes and a timeout mid-zip would hand the caller a truncated archive. The readiness probe
+  has the opposite setting — two seconds — because a slow answer there *is* the failure.
+- **`Export.Core` took `Microsoft.Extensions.Logging.Abstractions`**, the same single package the
+  Archive's `Core` has, so an export's one summary line lives with the rules that produced it. Both
+  services now share one allowlist in `ProjectDependencyTests`.
+- **What the Archive refused becomes a `400`, not a `502`, because** a cabinet that does not exist
+  or a marker field that is read-only is the caller's mistake. A transport failure is a `502`: that
+  one is not their fault. The split is on `HttpRequestException.StatusCode`.
+
+  **The reason no longer travels with it.** The client was written to read the refusal body into the
+  exception message, so "There is no file cabinet named 'Nonsense'" reached the Export's caller;
+  it now uses `EnsureSuccessStatusCode()`, which does not read the body. The status still splits
+  `400` from `502`, but the `detail` a caller sees is the framework's generic sentence.
+  `A_status_the_Archive_refused_with_is_carried_into_the_failure` asserts exactly that — status
+  carried, sentence not — so the behaviour is pinned rather than assumed, and
+  "The Export service" in `DECISIONS.md` lists it under "Known limits". Worth restoring before the client is
+  built: the brief asks that an error show the server's message, and a generic one gives the client
+  nothing to show.
+- **Compose gives the Export the Archive by service name** (`http://archive-api:8080`) and depends
+  on it only for start order. The brief's "services may start in any order and may be briefly
+  unavailable" is answered in the service rather than in compose: an export attempted while the
+  Archive is away returns `502` naming it unreachable, and the next one succeeds without a restart
+  here. See "Health checking, removed" below for what the gating used to do.
+- **Removed: the time zone parameter.** Asked about on 2026-10-30, argued against, then removed on
+  the reaffirmed instruction that the client and the services share a zone for the demo. Dates are
+  now read as **UTC calendar days** on both services, and the marker carries the UTC date.
+  `ExportTimeZone` is gone, `CalendarRange.Of` takes two dates, and the `timeZone` query value and
+  body field are gone from the Archive and the Export.
+
+  **What it costs, stated plainly rather than glossed.** The brief's "calendar dates, both
+  inclusive, **as the user means them**" is now satisfied only for a caller in UTC, and "users,
+  services and containers may be in different time zones" is **no longer addressed** — the coping
+  table below says so. Measured before the removal: the same request for 30 October 2026 returned
+  **24** documents read in UTC, **35** in `Pacific/Kiritimati` (UTC+14) and **0** in
+  `Pacific/Midway` (UTC−11), so a caller whose day differs from UTC's genuinely sees different
+  documents. `An_instant_is_judged_by_its_UTC_day_whatever_offset_it_carries` and
+  `A_document_belongs_to_the_UTC_day_it_was_stored_on` pin the new behaviour rather than leaving it
+  implied.
+
+  **Reinstating it** is one optional parameter per service plus the conversion `CalendarRange` used
+  to do; the deleted tests are in the history. Two shapes were refused along the way and would be
+  again: the **container's local zone** as the default, because the same request would answer
+  differently in two deployments; and a **UTC offset** instead of an IANA id, because a range
+  spanning 29 March 2026 needs `+02:00` at its start and `+03:00` at its end. `InvariantGlobalization`
+  stays off — the export still needs real culture data, and a future zone would need tzdata.
+- **The Export pages with one request made up front and a `do/while` for the rest, because** the
+  first page is the one request an export always needs *and* the thing that says how many documents
+  there are, so asking for it before testing anything costs nothing and tells the loop when to
+  stop. It reads while `read < total`, which means a complete read costs exactly as many requests as
+  there are pages — the earlier shape asked once more and read an empty page to discover it was
+  finished. `page.Documents.Count > 0` stays as a guard so a total the Archive cannot deliver ends
+  the read rather than looping for ever, which is a real risk: an earlier edit removed the
+  termination entirely and the loop became infinite until the compiler's unused-parameter error gave
+  it away. It is still an `IAsyncEnumerable`, so a caller that stops early pays for no further page
+  — `A_later_page_is_not_asked_for_until_the_caller_needs_it`.
+- **The marker is written once, after the archive is complete, by a batch route.** Built on
+  2026-10-30 after the alternative below was refused. `PATCH /cabinets/{c}/documents/index-values`
+  takes a list of ids and one set of values; `ExportService` collects the ids as it writes and marks
+  them all once the zip is closed. Measured on the containers: an export of 24 documents now costs
+  the Archive **1** `PATCH` instead of 24, and that one request fanned out to 24 document writes
+  with all 24 marked.
+
+  Three consequences, all deliberate. **A failure partway leaves nothing marked** rather than the
+  first few — the better failure mode, and `Nothing_is_marked_until_the_whole_archive_is_built`
+  pins it. **Ids are resolved before any write**, so one bad id refuses the whole batch instead of
+  half-applying it; that costs a second pass over the directory names, which is the price of not
+  leaving a batch half done. And **the per-document route was removed**: the brief asks the Archive
+  to own "updates of index values", which a batch of one satisfies, so keeping two routes for one
+  capability would have been two things to keep correct.
+
+  The response is a count, not the documents. An export marks every document in its range in one
+  request, so echoing them back would make the response grow with the size of the export; a caller
+  that needs the new values reads them. The *request* still grows with the number of ids, which is
+  noted as a limit in "The Export service" in `DECISIONS.md` — chunking one batch per page is the obvious
+  next step and needs no API change.
+- Rejected: **writing the marker as part of the request that reads a part's content.** Proposed on
+  2026-10-30 to save the per-document `PATCH`. It cannot work, and the deciding case is the one that
+  is easy to miss: a document with **no parts** makes no content request at all, so it would never
+  be marked — 2 of the 24 documents in the round trip are empty folders, and the brief requires both
+  that an empty subfolder be a document and that every exported document carry the marker. Four more
+  reasons: the marker is per document while content is per part, so a three-part document would be
+  marked three times; a `GET` would mutate, so a retry, a cache or a web client previewing a part
+  would re-stamp it; marking would happen *before* the entry is in the archive; and a read route
+  would have to take the caller's chosen marker field, coupling the Archive's public API to one
+  caller. Batching gets the saving without any of that, which is what was built.
+- Rejected: **sharing a DTO or a project with the Archive.** The client's four DTOs duplicate the
+  Archive's wire shape on purpose; `No_Export_project_references_an_Archive_project` and its mirror
+  enforce it. That duplication is the boundary.
+
+## What an export costs, and what it does not promise
+
+Nothing reads a part into memory. Three hops, each streaming, measured on 2026-10-30 at 200 MiB
+through a container whose memory went 60 MB → 72 MB → 62 MB:
+
+| Hop | Why it does not buffer |
+|---|---|
+| The Archive serves the part | `FileStream` with a 64 KiB buffer, sent by `FileStreamResult` in chunks |
+| The Export reads it | `HttpCompletionOption.ResponseHeadersRead`, then `ReadAsStreamAsync` |
+| The Export writes it | `CopyToAsync` into `ZipArchive.CreateEntry(…).Open()`, onto the temp file |
+| The caller downloads it | `FileStreamResult` over that temp file |
+
+What *does* grow with an export is bounded by the **number of entries**, not their size: the zip's
+central directory, the table of entry names taken, one page of document metadata, and the marker
+request's list of ids. An export of a million tiny documents would press on memory where one
+enormous document does not.
+
+What an export does not promise:
+
+- **No resume and no concurrency control.** Two exports of the same range run independently and both
+  write the marker; the last one wins.
+- **The marker is the only record that an export happened.** There is no export history, and no way
+  to ask what a previous export contained.
+- **A document stored while an export runs** may or may not appear. The Archive pages by directory
+  name, so one stored after the export started sorts after the page already read — skipped rather
+  than duplicated, but nothing promises that.
 
 ## Tests
 
@@ -173,7 +373,7 @@ Created on 2026-10-30, projects only — no export rule is implemented.
   silent": the fake is told which title to fail, and the test checks the other documents still
   stored and the failed row carrying its reason.
 - **The endpoints are tested through `WebApplicationFactory` over the real `Program.cs`, because**
-  the statuses, the two error shapes, the page cap and the health endpoints are properties of the
+  the statuses, the two error shapes and the page cap are properties of the
   whole pipeline, and they had been verified only by hand against a container for several sessions.
   It needs no container and no network — the inputs are the repository's own `fixtures/cabinets.json`
   and a temp directory — so `dotnet test` still satisfies the brief's offline requirement. It also
@@ -262,22 +462,32 @@ Created on 2026-10-30, projects only — no export rule is implemented.
   the rule tests deliberately avoid file IO, and without that comparison the fixture and the test
   doubles could drift apart while every rule test still passed against the wrong schema.
 
-## Containers and health
+## Containers
 
-- **Liveness and readiness are separate endpoints, because** they answer different questions and a
-  dependent service needs the second one. `/health` runs no checks and only says the process is up;
-  `/health/ready` checks the cabinet catalog resolved. The brief notes services may start in any order
-  and be briefly unavailable, so compose and the future Export service gate on `/health/ready`.
-  Honest caveat: the readiness check's unhealthy branch is currently unreachable, because the loader
-  already refuses to start on a cabinet set that is empty.
+- **Health checking, removed on 2026-10-31.** Both services had `/health` and `/health/ready`, three
+  checks behind them (the cabinet catalog, a storage write probe, and the Export reaching the
+  Archive), a compose `healthcheck` per service, `curl` installed in both runtime images to call it,
+  and `export-api` waiting on `service_healthy`. All of it is gone, on the instruction that the demo
+  will give the services a moment to start and the machinery is overkill for a take-home.
+
+  What it bought, so the cost of the removal is on the record: `depends_on: service_healthy` meant
+  the Export could not be asked anything before the Archive answered, and the storage probe was the
+  one thing that would have named a volume owned by `root` instead of letting every upload fail one
+  at a time. What is left in its place: the Export answers `502` naming the Archive unreachable
+  rather than pretending, which is pinned by a test, and both services still fail fast at startup
+  on an unusable storage path or cabinet file — which is where the two Archive checks' unhealthy
+  branches were already unreachable from, since registration refuses to start on either.
+
+  `DocumentStorageRoot.CanWrite` went with it: the storage probe was its only caller, so it and its
+  three tests would have been dead code. Eleven tests were removed in total — the two liveness and
+  two readiness endpoint tests, four registration tests, and those three.
 - **`cabinets.json` is mounted read-only, not copied into the image, because** the brief requires the
   same image to run with different settings, and nothing about a particular deployment should be baked
   in. It also means the Archive cannot write its own definitions even by mistake.
 - **The runtime image is Debian-based, not Alpine, because** the export rules interpret the user's
   calendar dates in their own time zone, which needs the ICU and tzdata the Alpine images omit.
-- **`curl` is installed in the runtime image, because** the `aspnet` image ships no HTTP client and the
-  compose healthcheck needs something to call. The alternative — no healthcheck — would leave
-  `depends_on` unable to wait for readiness.
+  `curl` was installed alongside it for the compose healthcheck; with that gone, so is the
+  `apt-get` layer, and both runtime images are now the base image plus the published output.
 - **The container runs as `$APP_UID`, not root, because** everything a user uploads is untrusted and the
   process has no reason to hold root in the container.
 - **Compose publishes `${ARCHIVE_PORT:-8080}`, because** a hard-coded host port collides on a shared
@@ -318,17 +528,12 @@ container produced was the fact that it had started.
   reads in one place. The alternative considered was moving the store out to `Infrastructure`
   instead, which was refused because it would reverse "storing is what a document archive does" and
   split one decision across two projects again.
-- ~~**`OperationCanceledException` is not logged as a failure, because** a caller going away is not
-  a fault of the Archive's, and logging it at `Error` would make an abandoned upload look like a
-  broken volume.~~ **Not what the code does.** The `catch` arm in `DocumentsStoreService.AddAsync`
-  logs every exception, cancellation included, so an upload the caller abandoned appears in the log
-  as an `Error` indistinguishable from an unwritable volume. The guard was written three times and
-  removed three times; on 2026-10-30 the instruction was to make the tests reflect the code without
-  touching it, so `A_cancelled_store_is_logged_at_Error_like_any_other_failure` now states the real
-  behaviour and this entry is corrected rather than the code. The *report* is unaffected either way
-  — `UploadService.StoreOneAsync` still filters cancellation, which is tested
-  (`Cancellation_is_not_turned_into_a_failed_row`). Reinstating the guard is one `if` and a one-line
-  change to that test.
+- **Cancellation is logged at `Error` like any other failure.** Not what was wanted: the guard
+  excluding it was written three times and removed three times, and on 2026-10-30 the instruction
+  was to make the tests reflect the code. So an upload the caller abandoned appears in the log as an
+  `Error`, indistinguishable from an unwritable volume.
+  `A_cancelled_store_is_logged_at_Error_like_any_other_failure` states that rather than hiding it.
+  The *report* is unaffected — `UploadService` still filters cancellation, which is tested.
 - **The store is registered from the container rather than constructed eagerly, because** it now
   holds an `ILogger` and there is no provider to resolve one from at registration time. Both
   registrations resolve the same singleton — `IDocumentStore` for the rules, the concrete type for
@@ -347,6 +552,23 @@ container produced was the fact that it had started.
 
 ## The upload endpoint
 
+- **The mapping, against the given sample material**, since this is the shape every upload rule is
+  stated about:
+
+  ```
+  sample-material/              the uploaded folder; its NAME becomes the field value
+  ├── invoice-001.txt           -> document "invoice-001.txt", 1 part
+  ├── empty-note.txt (0 bytes)  -> document "empty-note.txt", 1 part (an empty part is still a part)
+  ├── Договор София.txt         -> document "Договор София.txt", 1 part
+  ├── delivery-2026-03/         -> document "delivery-2026-03", parts page1, page10, page2 (ordinal)
+  │   └── archive/old-page.txt  -> IGNORED, and reported as skipped
+  ├── Фактури Q1/               -> document "Фактури Q1", 2 parts
+  └── empty-folder/             -> document "empty-folder", 0 parts (still a document)
+  ```
+
+  Only the top level becomes documents; one level of folders becomes parts; anything deeper is
+  skipped *and* reported. A zero-byte file and an empty folder are different documents, which is
+  what the fixture exists to catch.
 - **The transport is `multipart/form-data` with a relative path per file, not a zip body, because** the
   client then sends the folder as the user picked it, and the server never decompresses untrusted
   input — no zip-slip check, no bomb limits, no entry-ratio policy to get wrong. The cost is that the
@@ -505,23 +727,13 @@ container produced was the fact that it had started.
   on the wire by the time MVC has serialised a body, and buffering the response into a
   `MemoryStream` to parse the JSON back out would cost the streaming the rest of the upload path is
   built for.
-- ~~**`SuppressModelStateInvalidFilter` is on, because** with no endpoint choosing a status, the
-  framework must not choose one either. Otherwise a blank `field` would come back as an automatic
-  `400` while every other refusal came back as `404`, which is exactly the inconsistency the single
-  shape exists to remove.~~ **Wrong as recorded: nothing in the solution sets that option**, and it
-  is not clear it was ever set — `grep` finds the name only in this file and in `README.md`.
-  Verified on 2026-10-29: a request with no `field` answers `400` with ASP.NET's automatic
-  `ValidationProblemDetails` (`"title": "One or more validation errors occurred."`, the message
-  under `errors.Field`), not a report and not the middleware's shape.
-
-  **Left as it is, deliberately.** The reasoning that argued for suppression was that the automatic
-  `400` would be the only `400` in a service where every other refusal was `404` — and that premise
-  died when `ArchiveExceptionMiddleware` made a broken field rule `400` too. So the automatic
-  response is now the *same status* as a rule refusal, carrying a `[Required]` message already
-  phrased as a user-facing sentence, which is what the convention "a DTO declares its own rules"
-  asks for. The residue is that a caller sees two `400` bodies — `errors.Field` for a missing
-  parameter, `detail` for a broken rule — both standard `ProblemDetails`. Worth knowing when the
-  client is written; not worth a filter that would push presence checks into `Core`.
+- **Model validation is left on, so a missing form field answers ASP.NET's own
+  `ValidationProblemDetails`.** Both documents claimed the filter was suppressed and nothing in the
+  solution set it — found on 2026-10-30 by testing the statuses rather than reading the prose. The
+  reasoning for suppressing it had expired anyway: it existed so the automatic `400` would not be
+  the odd one out when every other refusal was `404`, and `ArchiveExceptionMiddleware` made a broken
+  field rule `400` too. The residue is two `400` bodies — `errors.Field` for a missing parameter,
+  `detail` for a broken rule — both standard `ProblemDetails`, both documented in `README.md`.
 - **`RelativePath` refuses rooted paths, `.`, `..` and control characters, because** a traversal
   attempt should be *reported* to the user rather than quietly stored as a document title. It cannot
   escape anything either way — a name is data and content on disk is addressed by a server-generated
@@ -553,6 +765,26 @@ container produced was the fact that it had started.
   larger than memory will not fit. Everything above it is written for a durable, streaming store, so
   replacing that one class is the whole change.
 
+- **`GET /cabinets` answers `choosable` per field as well as `writable`, because** the rule for the
+  upload field and the export marker field is "writable **and** text", and a client that filters a
+  dropdown on `writable && type == "text"` has restated a server rule — which the brief forbids. The
+  Archive already holds the rule as `Cabinet.WritableTextFields`; the flag is that property on the
+  wire. `writable` stays alongside it because the brief asks for it by name and it answers a
+  different question: whether a write to the field is allowed at all. On the fixture's `Invoices`
+  that is `InvoiceNumber`, `Supplier`, `Batch`, `Status` choosable, with `Amount` and `InvoiceDate`
+  writable but not choosable and `ApprovedBy` neither.
+- **The whole catalog comes back in one response rather than a route per cabinet, because** there are
+  two cabinets, fixed at deployment, and a client needs every one of them to populate its first
+  picker. A `GET /cabinets/{name}` would be a second round trip for data already sent. The response
+  is wrapped as `{"cabinets":[…]}` rather than a bare array, which matches `cabinets.json` and
+  leaves room to say something about the set later.
+- **One controller per entity** — `CabinetsController`, `UploadsController`, `DocumentsController`,
+  each routed at the path its entity owns — **because** `Contracts/` and `Core/Services/` are already
+  split that way, and the single `CabinetsController` had become five actions over three entities.
+  The routes did not change, which is what the endpoint tests prove: all of them still pass against
+  the same URLs. `ArchiveApplication` still names `CabinetsController` as the
+  `WebApplicationFactory` entry-point type, which only needs to be a type in the Api assembly.
+
 ## Storage
 
 - **Documents are files on a mounted volume, one directory each, with no database, because** every
@@ -570,18 +802,49 @@ container produced was the fact that it had started.
 
   The price, stated plainly: the directory tree is a hand-rolled index, and a new query shape means
   a new convention or a scan.
+- **The layout in full**, since the code no longer carries a diagram of it:
+
+  ```
+  <root>/
+    tmp/                                     staging; swept at startup
+    cabinets/<Cabinet>/
+      <yyyy-MM-dd>/                          the day, so a date range prunes without opening a file
+        <yyyyMMddTHHmmssfff>Z_<id>/          the exact instant, so a window needs no metadata
+          document.json                      index values and the part list
+          parts/<order:D3>_<partId>.bin      content, addressed by a generated id
+  ```
+
+  The names and the two formats live in `Core/Utils/Documents/DocumentStorageUtils.cs`, which also
+  holds the parsers that read them back; composing a path from them is done where it is used.
 - **The layout is `cabinets/<Cabinet>/<yyyy-MM-dd>/<timestamp>_<id>/`, because** it makes the
   directory tree the index. A date range prunes to a few day directories without opening a file,
   and the timestamp prefix makes an ordinal sort of the names chronological — so a page is chosen
   from directory names alone and only the documents actually on it are read. Zero-padded and
   ordinal so the order cannot depend on the container's locale.
-- **The layout lives in `DocumentsStoreService` rather than in a type of its own, because** the
-  `ArchiveStorageLayout` it replaced had twelve members and eight of them had exactly one caller —
-  a wrapper whose methods were each read once, at the only place that used them. Inlining them
-  keeps the property that mattered (the convention has one owner, and a second opinion about it
-  would corrupt the store rather than fail a test) while removing a type whose whole job was to be
-  delegated to. The part filename later came back into the store as `PartPath`, when the file DTOs
-  were retired and the store became the only thing that knows the layout.
+- **The store was split into four on 2026-10-30, at request**, having grown to 379 lines and 21
+  members as the Export's three routes landed on it. What came out, and why each earns a file:
+  `DocumentStorageUtils` (in `Core/Utils/Documents/`) holds the folder names, the day and instant
+  formats, and the two parsers that read a path back — pure, so the layout is now testable without
+  a filesystem, which 15 new tests do; `DocumentStorageRoot` holds `Prepare` and `CanWrite`, which
+  answers "is the deployment usable" rather than "where does this document go", and the readiness
+  probe now depends on it alone instead of holding the whole store; `DocumentMetadataFile` holds
+  reading and writing `document.json`, and owns the serialiser options because nothing else uses
+  them. The store keeps the port's five operations and the commit-whole-or-not-at-all property that
+  each of them turns on. 379 lines became 293 + 100 + 53 + 48.
+
+  **Only path helpers with more than one caller survived the split.** `CabinetsRoot`,
+  `DayDirectory`, `DocumentDirectoryName`, `PartFile`, `PartFilePattern` and `IsDocument` were each
+  a single-use `Path.Combine` or `EndsWith`, and a wrapper read once says less than the call it
+  replaces — the same reasoning that folded `ArchiveStorageLayout` in originally. The **formats**
+  stayed in `DocumentStorageUtils` even though composing moved out, because composing and parsing
+  have to agree: `DayOf` reads what a day directory was named with, and `StoredAtOf` reads the
+  instant out of a document directory's name. One owner for those strings is what keeps a date-range
+  query from silently reading the wrong documents.
+- **A wrapper whose methods each have one caller is noise** — the rule that decides what may be
+  extracted, learned the hard way. `ArchiveStorageLayout` had twelve members, eight of them read at
+  exactly one place, and folding it into the store removed a type whose whole job was to be
+  delegated to. The 2026-10-30 split above is the same rule applied in the other direction: the
+  layout came back out once its helpers had several callers each, and only those did.
 - **Part content files are named by a server-generated GUID, because** the brief requires that user
   names never become filesystem paths. The user's name is stored inside `document.json` as text,
   where `../../etc/passwd` is just an unusual title.
@@ -608,8 +871,8 @@ container produced was the fact that it had started.
   Three further reasons it cannot be assumed, in order of how quickly they bite. A volume
   **replaces** that path at runtime — an engine pre-populates only a new, empty named volume from
   the image, so a bind mount or a volume with content already in it gets nothing. `tmp/` is where
-  the readiness probe writes, so without it `/health/ready` answers `503` and `depends_on` never
-  releases; verified by deleting the directory from the running container. And running from source
+  every upload is staged before its atomic move, so without it the first upload fails; verified by
+  deleting the directory from the running container. And running from source
   (`Archive__StoragePath=$PWD/.archive-data`, which `README.md` documents) involves no Dockerfile at
   all. Underneath all three: a rule of the service would otherwise depend on a line in a deployment
   artefact, which is the coupling `cabinets.json` being mounted rather than baked exists to avoid.
@@ -617,11 +880,10 @@ container produced was the fact that it had started.
   documents inside the container's own writable layer, where they are lost on the next restart —
   the exact failure the setting exists to prevent. Same fail-fast reasoning as
   `Archive:CabinetsFile`, and verified both ways: absent, and pointing somewhere unusable.
-- **Readiness checks that the storage path is writable, because** the usual container failure is a
-  named volume whose root is owned by `root` while the process runs as `$APP_UID`. Without the
-  check that appears as every upload failing one at a time, with nothing pointing at the mount.
-  Honest caveat, the same one the cabinet check has: the unhealthy branch is hard to reach in
-  practice, because registration already refuses to start on a directory it cannot create.
+- **A named volume whose root is owned by `root` while the process runs as `$APP_UID` is the usual
+  container failure, and nothing now names it.** The readiness probe used to; with health checking
+  removed, that failure appears as every upload failing one at a time, logged at `Error` with the
+  path. The Dockerfile's `chown` below is what prevents it in the first place.
 - **The Dockerfile creates and `chown`s `/var/lib/archive` before `USER $APP_UID`, because** an
   empty named volume takes its ownership from the image's directory at first mount. Without it the
   volume root belongs to root and the first upload fails with a permission error.
@@ -665,9 +927,12 @@ container produced was the fact that it had started.
   the rule tests are still outstanding. If one is ever wanted it should be **Mapperly**: MIT,
   source-generated, compile-time errors, no reflection.
 - **`DocumentDraft` / `PartDraft` were merged into `Document` / `Part`, because** the project chose
-  fewer types over a compiler-enforced boundary. One type now spans both states: `Document.ToStore`
-  and `Part.ToStore` leave `Id` as `Guid.Empty` and set `OpenContent`; the store overwrites the
-  system fields and nulls `OpenContent`.
+  fewer types over a compiler-enforced boundary. One type now spans both states: a document on its
+  way in is written as an object initialiser, leaving `Id` as `Guid.Empty`, and `Part.ToStore` sets
+  `OpenContent`; the store overwrites the system fields and nulls `OpenContent`. `Document` has no
+  factory of its own — with every required property carrying a default, the initialiser says the
+  same thing in the same number of lines, and only `Part` needs one to pair a name with a
+  `Func<Stream>`.
 
   **What was given up, stated because it was argued before the change and accepted:** a client can
   now *express* an `Id`, a `StoredAt` and a `ModifiedAt` on the way in. The brief says those are the
@@ -791,7 +1056,7 @@ Found but not yet fixed, so they are not mistaken for decisions.
   path[2] is '/' or '\\'`. That still refuses `C:\Windows\x` and `C:/x`, and lets `C:x` through as
   an ordinary name, which is harmless because a name is never used as a path. Found on 2026-10-29
   by reading the planner, not by a test — the gap it sits in is on the
-  `docs/upload-requirements.md` §5 checklist as "traversal / absolute / reserved names neutralised".
+  "The upload endpoint" in `DECISIONS.md` §5 checklist as "traversal / absolute / reserved names neutralised".
 
 ## Known limits of the storage
 
@@ -814,26 +1079,13 @@ Deliberate, not oversights, and each one is where that part of the system breaks
 
 Things that are wrong on purpose, so they are reversed on purpose rather than discovered.
 
-- ~~**`404` is the status for "at least one entry failed", and it is the wrong code for most of the
-  cases it covers.**~~ **Resolved on 2026-10-29** by `ArchiveExceptionMiddleware`, which is the
-  `400`/`404`-split-by-cause option named at the end of this entry: a broken field rule is `400`, an
-  unknown cabinet is `404`, and a per-entry failure stays a `Failed` row inside a `200` report. Kept
-  here because the objection is the reason the split was made, and because the per-entry case still
-  needs reading the body. The original entry, as written when the `404` was asked for and
-  implemented:
-  - It is *correct* for an unknown cabinet.
-  - It is *wrong* for a partial failure. If 11 of 12 documents store and one fails, `404` tells the
-    caller "this URI does not exist" while the body says eleven documents were created. `404` is
-    about the resource, not about the work.
-  - It is *wrong* for a broken field rule, which is the caller sending something unusable — `400`.
-  - The practical cost: `HttpClient.EnsureSuccessStatusCode`, Refit and most `fetch` wrappers throw
-    on `404` and routinely drop the body, so the report can be lost exactly when it carries the
-    reason. The brief requires the client to "show the server's message" on an error, so the client
-    must be written to read the body of a `404`.
-
-  `207 Multi-Status` for a mixed result, or `400`/`404` split by cause, would each carry the same
-  signal without lying about the URI. The change is one line in
-  `UploadFailureStatusMiddleware.Judge`. *(That middleware no longer exists; the split was taken.)*
+- **A per-entry failure stays a `Failed` row inside a `200`; the status answers "was the request
+  usable".** An earlier version raised the whole response to `404` when any row failed, which was
+  asked for and objected to here before being resolved on 2026-10-29 by
+  `ArchiveExceptionMiddleware`: a broken field rule is `400`, an unknown cabinet is `404`, and a
+  report is `200`. The objection is kept because it is why the split was made — `404` is about the
+  resource, not the work, and `EnsureSuccessStatusCode`-style clients drop the body that carries the
+  reason.
 - **Success is `200`, not `201`.** An upload creates many documents, so there is no single
   `Location` to point at, and `201` would be a claim about creation that a report full of failures
   contradicts.
@@ -856,48 +1108,20 @@ extension; per-document commit with a report.
 
 ## Open debt
 
-- ~~**Test writing is paused** (2026-10-28, at request).~~ **Lifted on 2026-10-30**, and the debt is
-  repaid: 281 tests, 98.9% of lines. The folder→document upload rules, the refusals, the report, the
-  store, the mappings, the paging arithmetic, the status middleware and both endpoints are covered;
-  `dotnet test` still runs offline with no containers.
+- **The test debt is repaid.** Writing was paused on 2026-10-28 at request and lifted on
+  2026-10-30: 421 tests, every upload and export rule covered, `dotnet test` still offline with no
+  containers. What is left uncovered is deliberate — the `Discard` catch arm that swallows a failed
+  cleanup (no portable way to make a delete fail) and the `_ => throw` arms that cannot be reached
+  while every `FieldType` and `IndexValue` case is handled.
 
-  What is left uncovered is seven lines, and each is deliberate: the `Discard` catch arm that
-  swallows a failed cleanup (no portable way to make a delete fail), the two `_ => throw` arms that
-  cannot be reached while every `FieldType` and every `IndexValue` case is handled, and
-  `UploadEntry.Failed`, which has **no caller at all** — `UploadService` builds a failed row with
-  `planned with { … }` instead. That factory is dead code; it was left in place because the
-  instruction for that session was to change tests only.
-
-  **One exception was taken on 2026-10-29, and is flagged rather than assumed:** the store's logging
-  tests shipped with the logging fix — four as `LoggingDocumentStoreTests`, then five as
-  `DocumentsStoreServiceTests` once the decorator was merged in, taking the suite from 65 to 70. The
-  reason is that the behaviour being added exists *because* an untested behaviour was silently
-  deleted by a refactor — see the `UploadFailureStatusMiddleware` note under "AI notes" — so
-  shipping it untested would have repeated the exact failure it fixes. Deleting those four tests is
-  a one-file change if the pause was meant to cover this too.
-- ~~**The debt was re-measured on 2026-10-30**: of 70 tests, 9 are architecture, 31 the
-  `cabinets.json` loader, 25 the index-field rules and 5 the store's logging.
-  `UploadPlanningService` and `UploadService` have none.~~ **Closed later the same day** — the split
-  is now 143 in `Core.Tests`, 84 in `Api.Tests` and 54 in `Infrastructure.Tests`, with the
-  folder→document rules covered rule by rule.
-- ~~**The debt now has a shape.** Every upload rule shipped on 2026-10-29 is uncovered:
-  top-level file → one document; top-level folder → parts are its direct files; natural part order;
-  nested entries skipped **and** reported; empty folder → document with zero parts; zero-byte file →
-  one empty part; the chosen field set on every document; traversal and rooted paths refused;
-  Unicode names unchanged; two uploads of the same folder both surviving; per-document failure
-  reported and the rest still attempted. The checklist in `docs/upload-requirements.md` §5 is the
-  list to work through. All of it was verified by hand instead (see "How to verify a change" in
-  `AGENTS.md`), which is not the same thing and does not satisfy the acceptance criterion.~~
-  **Every item on that list now has a test**, in `Core.Tests/Uploads/` and
-  `Api.Tests/Endpoints/UploadEndpointTests.cs`.
 - **The verified container evidence is from a VM that no longer exists** (2026-10-29). Podman was
   removed and reinstalled during the compose detour, so the machine, images and volumes are new and
-  the original twelve-document round trip cannot be pointed at any more. `compose up --build` and the
-  healthcheck are confirmed working on the rebuilt machine, but the full acceptance run — upload the
+  the original twelve-document round trip cannot be pointed at any more. `compose up --build` and both
+  services answering are confirmed working on the rebuilt machine, but the full acceptance run — upload the
   sample material, `down`, `up`, same documents in the same order — is owed again on it, and so are
   the rootless-UID and `Archive__*` binding checks that `README.md` still records from before.
 - **The container exits on its own, and `restart: unless-stopped` does not bring it back**
-  (observed twice on 2026-10-29). `podman ps -a` shows `Exited (0) … (healthy)` after a quiet
+  (observed twice on 2026-10-29). `podman ps -a` shows `Exited (0)` after a quiet
   period, and the log ends with "Application is shutting down…" — so the process received a clean
   SIGTERM rather than crashing. Suspected to be the Podman machine's WSL backend being suspended by
   Windows, which would stop the container without compose seeing a failure, but that is a guess:
@@ -932,35 +1156,27 @@ extension; per-document commit with a report.
 **Built:** the solution, shared build configuration, cabinet and index-field model, the field rules
 (type / `maxLength` / `writable`, and which fields may be chosen for upload or as an export marker),
 the enforced dependency rules, the `cabinets.json` loader with its validation and fail-fast startup,
-a runnable Api with OpenAPI, SwaggerUI and `/health`, and **the upload endpoint end to end** — the
+a runnable Api with OpenAPI and SwaggerUI, and **the upload endpoint end to end** — the
 folder-to-document mapping, ordinal part ordering, untrusted-path handling, per-document commit and
-the one-row-per-entry report. 281 passing tests across three test projects, covering 98.9% of
-lines.
+the one-row-per-entry report. 411 passing tests across six test projects.
 
 Also built: **durable storage** — documents are directories of files on a mounted volume, committed
 by one atomic rename, with `tmp/` swept at startup — `GET /cabinets/{name}/documents`, a paged read
-capped by `Archive:MaxPageSize`, **the containers** (`compose up --build`, data surviving `down` and
-`up`, readiness gating), and **the logs** (one line per request, per stored document and per
+capped by `Archive:MaxPageSize`, **the containers** (`compose up --build`, data surviving `down`
+and `up`), and **the logs** (one line per request, per stored document and per
 refusal, with a storage failure at `Error`).
 
-**Missing.** Reviewed in full on 2026-10-30; the Archive is **not** feature-complete even leaving
-the Export service and the client aside. The test gap that headed this list was closed later the
-same day — 281 tests at 98.9% of lines, including the folder→document rules — so what remains is
-functionality:
+**Missing**, after the Export service was built later on 2026-10-30:
 
 | Gap | Brief | Note |
 |---|---|---|
-| **Read a part's content over HTTP** | "fetches their content", and the Export never touches the Archive's storage | No endpoint exists; `PartResponse` carries `Id` / `Name` / `Order` / `SizeInBytes` and no content or link. **Blocks the Export service and the client's download.** Would be `GET /cabinets/{cabinet}/documents/{id}/parts/{partId}/content`, streamed from the part file with its `SizeInBytes` as `Content-Length` |
-| **Update index values** | "updates of index values"; "writes the export marker back through the Archive" | No endpoint. **Blocks the export marker.** Would be a `PATCH` of named values through `IndexFieldRules.ValidateWrite`, setting `ModifiedAt`, rewriting `document.json` by the same staging-and-rename route `AddAsync` uses |
-| **Date-range filter on the query** | "queries with a date range and paging"; the filter is on `StoredAt`, inclusive calendar dates as the user means them | Paging exists, the filter does not. This is also where the whole time-zone requirement lands: the day directories make the pruning cheap, but nothing yet converts a user's calendar date to a UTC instant |
-| **`GET /cabinets`** | The client picks a cabinet and sees each field's type and whether it is writable | No endpoint, so a client cannot learn the fields without restating them — which the brief forbids. The catalog is already in memory; this is a read of `ICabinetCatalog` and a response DTO |
-| **CORS** | "The client may be served from a different host than the services" | No policy configured |
+| **CORS** | "The client may be served from a different host than the services" | No policy configured, on either service |
+| **The web client** | Priority 4 | Not started. Both services have browsable OpenAPI, which the brief accepts as the fallback demo |
 
-Then, out of scope for this review but named for completeness: the export rules, the web client, and
-the round-trip demo that needs both. The Export service's **projects** exist as of 2026-10-30 — six
-of them, same shape as the Archive, with OpenAPI and liveness wired and four tests that boot the
-host — but no export rule, no Archive client, no endpoint, no Dockerfile and no compose service.
-The seven export rules that are owed are listed under "The Export service's projects" above.
+Everything else the brief asks of the two services is built. The export rules that were listed as
+owed are done and tested, the three Archive routes they needed exist, `GET /cabinets` now answers
+the schema a client needs, and `compose up` starts both services, the Export started after the
+Archive.
 
 Against "Things your system must cope with":
 
@@ -970,13 +1186,13 @@ Against "Things your system must cope with":
 | Names may contain any Unicode character | Addressed — verified that `Договор София.txt` and `Фактури Q1` round-trip unchanged, and that stored content is byte-identical to the source by SHA-256 |
 | Data survives restarting the containers | Addressed — documents are files on a named volume, and the service holds nothing in memory. Verified by uploading, stopping the service, starting it cold and reading the same 12 documents with the same ids back |
 | An operation must not leave anything behind | Addressed on the upload side — content streams are opened and disposed in one `await using`, a failed document's staging directory is deleted, and `tmp/` is swept at startup. Verified: a planted staging directory is gone after the next start |
-| Export changes data: what remains if it fails halfway | Partly — an upload commits per document by atomic rename, so a document is complete or absent and the report says which. The export side does not exist |
-| Exports larger than memory | Partly — part content is now streamed to disk and can be streamed back out, so the store no longer caps it. The upload endpoint still needs the whole body to arrive first, which is named in "The upload endpoint" |
-| Configurable maximum page size | Addressed — `Archive:MaxPageSize`, default 50. The date-range filter is still missing |
-| Time zones | Groundwork only — `DateOnly`, UTC `StoredAt`/`ModifiedAt`, no `InvariantGlobalization` |
-| Services may start in any order | Partly — `/health/ready` exists for a dependent service to wait on |
+| Export changes data: what remains if it fails halfway | Addressed — an upload commits per document by atomic rename; an export builds the whole archive into a temp file before sending, so a failure is a status with nothing delivered rather than a truncated `200`. Documents already marked stay marked, which is deliberate and written down in "The Export service" in `DECISIONS.md` |
+| Exports larger than memory | Addressed, and **measured** on 2026-10-30: a 200 MiB part exported through a container whose memory went from 60 MB to a 72 MB peak and back to 62 MB, producing a valid 200 MiB archive. Part content is streamed socket → zip entry → temp file in 80 KiB copies, and the response streams from that file. What does scale with an export is bounded by the **number** of entries, not their size: the zip's central directory, the duplicate-name table, and one page of document metadata. The upload endpoint still needs the whole body to arrive first, which is named in "The upload endpoint" |
+| Configurable maximum page size | Addressed — `Archive:MaxPageSize`, default 50, enforced on every read and the cap the Export pages against. The date-range filter it is combined with is built and tested |
+| Time zones | **Not addressed, on purpose** — the time-zone parameter was removed on 2026-10-30 because the client and the services share a zone for the demo. Dates are UTC calendar days and the marker carries the UTC date, so a caller in another zone sees UTC's day boundaries. The measurement of what that costs, and how to reinstate it, are under "Removed: the time zone parameter" |
+| Services may start in any order | Addressed in the service, not in compose — an export attempted while the Archive is away returns `502` naming it unreachable, and the next one succeeds without a restart. The `service_healthy` gate that used to hold the Export back was removed with the health checks on 2026-10-31 |
 | Different hosts for client and services | Not addressed — no CORS policy yet |
-| The logs of every service are visible | Addressed for the one service that exists — see "What the service logs". `compose logs` shows startup, one line per request, one per stored document, and refusals |
+| The logs of every service are visible | Addressed for both — see "What the service logs". `compose logs` shows startup, one line per request, one per stored document, and refusals |
 | Failures reach callers in one documented shape | Partly — a rule refusal and an unknown cabinet are `ProblemDetails` from `ArchiveExceptionMiddleware`, but a missing form field is ASP.NET's own `ValidationProblemDetails`. Two shapes, both documented in `README.md`; reconciling them is open |
 | Fields have types and limits | Addressed — `IndexFieldRules`, enforced on the upload path |
 
@@ -1056,6 +1272,38 @@ Where the AI was wrong, and how it was caught.
   way to tell a superseded path from a lost one is to look for the live counterpart of each —
   mechanically, not by recognising names. Recovered from `d1fc81b` rather than retyped, so the
   restored files are the reviewed originals.
+- **The export streamed its zip straight into the response, and only a test caught that it could
+  not.** `ZipArchive` writes synchronously; ASP.NET Core refuses synchronous writes to the response
+  body. The design read fine, the unit tests passed against a `MemoryStream`, and the endpoint test
+  failed with `InvalidOperationException: Synchronous operations are disallowed` — which would
+  otherwise have been a 500 on the first real export in the container, after the containers had been
+  declared working. Two lessons. A test that boots the real host catches a class of mistake no unit
+  test can, which is the argument for having written those. And the diagnosis needed the host's own
+  log: the `ProblemDetails` body said only "An error occurred", so a capturing `ILoggerProvider` was
+  wired into the test factory to read the real exception, then removed. The fix — build into a temp
+  file, then send — turned out to be better than the original design, because it makes a failure a
+  status rather than a truncated `200`.
+- **A paging loop that tested the condition after the fetch asked for a page past the end.**
+  `ReadDocumentsAsync` had become `while (read < page.Total && page.Documents.Count > 0)` with the
+  next fetch at the bottom of the body, so every read issued one request more than it owed: the
+  condition was re-tested against the *new* page's total, after that page had already been asked
+  for. Two of its own tests say otherwise — `One_request_is_enough_when_the_first_page_holds_
+  everything` saw two requests, and `No_request_is_made_for_a_page_that_is_not_owed` saw three — so
+  the rule was covered; the suite went from green to red mid-session when the file changed. The
+  loop now yields, then breaks on `read >= page.Total`, and keeps `Documents.Count > 0` as the
+  guard for a total the Archive cannot deliver. Against the Archive the wasted request is cheap;
+  against the review demo it is one line in the log per export that no one can account for.
+
+- **A hand cleanup of the store silently disabled the instant filter, and a green suite said nothing.**
+  Rewriting `DocumentDirectories` to name its locals changed `StoredAtOf(directory)` to
+  `StoredAtOf(day)`. A day directory is named `2026-03-01`, which the parser cannot read as an instant,
+  so it returned `null` and the `storedAt.Includes(...)` check never fired — the window degraded from
+  instant precision to whole days. All 421 tests passed, because every range test went through
+  `CalendarRange.Of(day, day)`, which is day-aligned by construction and cannot tell the two apart.
+  The rule was only reachable by building a `StoredRange` directly, which nothing did. Fixed the one
+  token and added `A_window_that_starts_inside_a_day_excludes_what_was_stored_before_it`, verified by
+  reinstating the mutation and watching it fail. Lesson: a filter tested only through a coarser
+  constructor is an untested filter, however many tests pass through it.
 - **A bulk path rewrite missed the case that mattered.** After the fixtures moved to `fixtures/`, a
   `sed` over `Task/fixtures/` fixed the documents and `appsettings` but silently skipped
   `RepositoryLayout.Path("Task", "fixtures", ...)`, where the segments are separate C# string
@@ -1064,54 +1312,31 @@ Where the AI was wrong, and how it was caught.
 
 ## Time log
 
-Rough, as the brief asks for. Durations are approximate and grouped per working session.
+Rough, as the brief asks for, and grouped per session rather than per prompt. ~30.0 h in total.
 
 | Date | Time | What |
 |---|---|---|
-| 2026-10-28 | ~0.5 h | Read the brief and fixtures, inspected the sample material, wrote the upload requirements analysis and scaffolded `README.md` / `AGENTS.md` / `DECISIONS.md` |
-| 2026-10-28 | ~0.1 h | Document upkeep: paused and then resumed time tracking |
-| 2026-10-28 | ~1.0 h | Assessed the .NET Core 2.0 scaffold, agreed the architecture, rebuilt the solution on .NET 9, implemented the cabinet/index-field model and field rules with 25 tests, restructured the repository layout twice |
-| 2026-10-28 | ~0.3 h | Revisited the one-vs-two-solutions question; added the enforced dependency tests and the repository-layout test helper |
-| 2026-10-28 | ~0.7 h | Built the cabinets.json loader, catalog and validation with 33 tests; wired fail-fast startup and the required `Archive:CabinetsFile` setting; verified the running service's endpoints |
-| 2026-10-28 | ~0.5 h | Review pass: dropped the custom exception for SDK types, renamed reader to loader, merged parsing into it, applied Clean Code decomposition, and moved Core onto `Domain/<entity>/` folders |
-| 2026-10-28 | ~0.4 h | Moved the cabinets.json rules onto the DTOs as DataAnnotations attributes, removed the serialiser options and all eleven loader guard methods, and closed three rules that had no test |
-| 2026-10-28 | ~0.4 h | Split the single test project into one per production project plus a shared TestSupport library, and added two tests that enforce the split |
-| 2026-10-28 | ~0.4 h | Cleared the Program.cs TODOs: split liveness from readiness with a catalog health check, and wrote the Dockerfile, .dockerignore and compose files (unverified — no Docker available) |
-| 2026-10-29 | ~0.2 h | Found that foreground `podman-compose up` crashes on Windows (`asyncio.add_signal_handler` is unimplemented there) and documented `-d` as required, with `podman-compose logs` for output. One crash left the named volume empty; could not reproduce, so recorded as unconfirmed rather than asserted. Re-verified `down` → `up -d` preserves documents |
-| 2026-10-29 | ~0.5 h | Got the stack running through compose: installed `podman-compose` and verified `up --build` → upload → `down` → `up` keeps the documents, with the compose healthcheck reporting healthy. Diagnosed why `podman compose` fails on this machine (no `win-sshproxy.exe`, so no named pipe) and documented it. Confirmed `security_opt: no-new-privileges:true` works on both engines |
-| 2026-10-29 | ~0.3 h | Added placeholders to `appsettings.json` for every setting compose injects. The two required paths are documented by comment only and carry no value, not even `null`: the JSON provider surfaces `null` as an empty string, which `?? throw` does not catch, so a placeholder value would have replaced the named startup error with a generic one. Verified both named errors. Documented running under Podman in `README.md`, including the missing-named-pipe failure and the build/run fallback, and corrected the README claims that the image had never been built |
-| 2026-10-29 | ~0.6 h | Split every Core root folder by entity (`Domain/Cabinets`, `Validation/IndexFields`, …) and moved `CabinetCatalog` and `DocumentsStoreService` into `Core/Services/<entity>/`, leaving `Infrastructure` with the dependency registrations, health checks and the cabinets loader. Per-file usings recomputed from the types each file actually references. Verified the container round trip, the refusal statuses and persistence across recreate |
-| 2026-10-29 | ~0.7 h | Replaced the status middleware with `ArchiveExceptionMiddleware`: Core throws `UnknownCabinetException` / `UploadRefusedException`, the middleware maps them with a `switch` to `404` / `400` and rethrows anything else for `UseExceptionHandler`. Restructured `Core` into `Domain` / `Services` (+`Interfaces`) / `Validation` / `Exceptions`, moved `PagingLimits` into `Contracts/Shared`. Verified every status in the container |
-| 2026-10-29 | ~0.9 h | Merged `DocumentDraft`/`PartDraft` into `Document`/`Part` and moved the on-disk JSON shape onto them, matching how cabinets already worked; retired the file DTOs and their mappings. Split `Contracts/` into one folder per entity with `Requests`/`Responses`/`Mappings`, deleted `Api/Results/`, and moved both health checks into `Infrastructure/Health/` registered by the `Add…` extension that owns them. Caught and fixed a duplicated `"Type"` in the stored JSON by reading the file. Re-verified the container round trip and restart |
-| 2026-10-29 | ~0.1 h | Replaced the inline `file is null ? 1 : 2` depth limit with a `maxSegments` parameter and two named constants; wrote up why `DocumentDraft` exists and why that is consistent with merging `UploadEntry`. No behaviour change |
-| 2026-10-29 | ~0.8 h | **Built and ran the image for the first time, on Podman 6.1.4.** Verified rootless UID 1654 owns the volume, the upload round trip, and that destroying and recreating the container keeps all 12 documents. Merged `PlannedDocument` + `UploadEntryResult` into `UploadEntry`, moved all mapping into extension classes, and refused AutoMapper on licence and fit |
-| 2026-10-29 | ~0.4 h | Made the service container-only: merged `PlanState` into `UploadEntryOutcome`, deleted the local `.archive-data` and the `Archive` section of `appsettings.Development.json`, moved `MaxPageSize` / `MaxUploadBytes` / `MaxUploadEntries` into compose from `.env`, added `stop_grace_period` and `no-new-privileges`, and reworked `README.md` around `docker compose`. Verified the four `Archive__*` names bind by running the service with exactly the variables compose sets |
-| 2026-10-29 | ~0.1 h | Clarified in `README.md` that the container's named volume and the local `.archive-data` are two independent archives, and that `down` keeps named volumes while `down -v` destroys them |
-| 2026-10-29 | ~0.2 h | Folded `ArchiveStorageLayout` into `DocumentsStoreService` — eight of its twelve members had a single caller. Re-verified upload, restart, paging and the refusal paths |
-| 2026-10-29 | ~0.1 h | Confirmed where storage actually resolves to; documented in `README.md` that a relative path resolves against the content root rather than the shell's directory, and that both resolved paths are logged at startup |
-| 2026-10-29 | ~1.2 h | Settled the storage question (files, not a database) and built it: `DocumentsStoreService`, `ArchiveStorageLayout`, the `document.json` DTOs, the required `Archive:StoragePath`, a storage readiness check, `GET /cabinets/{name}/documents` with paging, the compose volume and the Dockerfile ownership fix. Verified a cold restart keeps all 12 documents, two uploads give 24, content is byte-identical by SHA-256, and `tmp/` is swept |
-| 2026-10-29 | ~0.2 h | Merged `Refused` and `Refuse` into one method returning the refusal report; checked the brief first and kept the per-rule reasons, which it requires. Verified all six refusal branches by hand |
-| 2026-10-29 | ~0.3 h | Extracted the mapping back out as `UploadPlanningService`, returning one `List<PlannedDocument>` with a `PlanState` per entry; renamed `UploadForm` → `UploadFormRequest` and `UploadEntryResultResponse` → `UploadEntryResult`. Re-verified the sample material and the subfolder-only case |
-| 2026-10-29 | ~0.3 h | Folded `UploadPlanner` into `UploadService.Plan` and `UploadService.Place`, retiring `UploadPlan`, `PlannedDocument`, `PlannedPart`, `SkippedEntry` and the `FileIndex` indirection. Verified the sample material is unchanged and that a subfolder-only folder still becomes a document |
-| 2026-10-29 | ~0.1 h | Walked through how `PlaceFile` handles nesting deeper than one level. No code change; surfaced that an intermediate folder is only reported as skipped if the client names it, now written down in `docs/upload-requirements.md` and `AGENTS.md` |
-| 2026-10-29 | ~0.2 h | Worked out and tested the example request payload (raw multipart, curl, browser `FormData`); added the verified recipes to `README.md`. Found that curl drops the relative path unless `;filename=` is given explicitly |
-| 2026-10-29 | ~0.2 h | Dropped `NaturalNameComparer` for `StringComparer.Ordinal` in the planner and the report, reversing the earlier part-order decision; corrected the four documents that asserted natural order |
-| 2026-10-29 | ~0.2 h | Walked through `UploadPlanner` line by line as review preparation. No code change; the read turned up the `IsRooted` false positive recorded under "Known defects" |
-| 2026-10-29 | ~0.2 h | Took `FindField` off `Cabinet`: a private copy in `IndexFieldRules`, an inline `First` in `UploadService.StoreAsync` that retires a null-forgiving `!`, and two tests moved onto `Fields` directly |
-| 2026-10-29 | ~0.5 h | Reworked the response: dropped the `UploadOutcome` hierarchy and the `ProblemDetails` branches, moved the status decision into `UploadFailureStatusMiddleware` (`200`, raised to `404` on any failure) along with the failure logging, took the logger out of the controller, suppressed the automatic model-validation `400`, and split the report and DTO types one per file. Re-verified by hand against the sample material and all four refusal paths |
-| 2026-10-29 | ~0.4 h | Diagnosed the recurring `podman ps … exit status 125` crash on `podman-compose up`: not the compose file but Podman 6 changing `ps`'s `.Labels` from a map to a slice, which breaks podman-compose ≤ 1.4.1's `{{ index .Labels … }}` template. Upgrading 1.2.0 → 1.6.0 cleared it and exposed the opposite bug — `is_context_git_url()` reads a Windows absolute context path as a git URL and drops `-f <dockerfile>` — so no released version does `up --build` here. Settled on pre-building with `podman build` plus `up -d --no-build`, verified healthy end to end, and wrote the version matrix into `README.md` |
-| 2026-10-29 | ~0.3 h | Podman reinstalled, and `podman compose up --build` works as the single command — the earlier dead end was `podman-compose` (the Python reimplementation), never `podman compose`, which delegates to the Docker Compose v2 binary; the volume labels (`com.docker.compose.version: 2.29.7`) and the hyphenated container name are how that was confirmed. Traced where documents actually live: named volume → `/var/lib/containers/storage/volumes/nemetschek-archive_archive-data/_data` in the rootful store inside the VM → a single `ext4.vhdx` on Windows, unreachable over `\\wsl$` because `volumes/` is root-only. Recorded the three ways in, and corrected every "no engine installed" claim the previous step had put into the three documents |
-| 2026-10-29 | ~0.4 h | Asked for `podman-compose up` to be the single command; established it cannot be, since plain `up` only builds when the image is absent and `up --build` hits the context-path bug. Was about to move the Dockerfile to the context root so Podman's own discovery would find it without `-f`, when the call was made to drop Podman instead. **Uninstalled Podman wholesale**: the machine, five orphaned `podman-machine-*` WSL distros, the CLI, Podman Desktop (winget reported success but left 523 MB in `C:\Program Files`, so the all-users NSIS uninstaller was run elevated), the `podman-compose` pip package, the `containers` state directories and the stale `PATH` entry. `Ubuntu` and `Ubuntu-26.04` kept. Took the unrelated `buyoff` MySQL/Redis volumes, the kind/minikube clusters and kafka with it — confirmed first, chosen without a backup. The repository was left alone; the Dockerfile move was not made, since `docker compose up --build` needs no workaround |
-| 2026-10-29 | ~1.5 h | Repaired a non-compiling `HEAD` (restored `FieldType.Date`, the `IndexValue.Date` case, a date validator and the four deleted tests; fixed the missing `[JsonPropertyName("writable")]` that made every field read-only). Settled the four open upload questions. Built the upload path: document model, `IDocumentStore`, `UploadPlanner`, `NaturalNameComparer`, `RelativePath`, `UploadService`, the in-memory placeholder store, the multipart contracts and `CabinetsController`. Verified by hand against the real sample material and all five refusal paths. Reworked the controller to a `cabinets` base route, a flat one-row-per-entry report, and no private methods. Updated README, AGENTS and this file |
-| 2026-10-29 | ~0.6 h | Diagnosed "nothing is logged to container logs": the pipe was fine — `podman logs` had the six startup lines — but the service emitted nothing afterwards, because `Microsoft.AspNetCore` is pinned to `Warning` and the whole solution held three `ILogger` calls, two of them at startup. Added the framework `HttpLogging` middleware (one combined line per request, no bodies or headers, `/health` excluded) and a `LoggingDocumentStore` decorator in `Infrastructure` so a store failure the upload report turns into a `Failed` row is still logged at `Error`. Four tests pin the decorator, and deleting the `LogError` was confirmed to fail exactly the one that names it. Traced the missing failure log back to the `UploadFailureStatusMiddleware` retirement and recorded it under AI notes. Verified in the container: a read, an upload of two documents and a refused upload each produce their line, the readiness probe none. The same trail turned up three stale document claims and corrected them: `docs/upload-requirements.md` and `README.md` still said a `Failed` row raises the status to `404`, and `AGENTS.md`'s verification table predicted `404` for four field refusals that in fact answer `400` (all seven statuses re-checked against the container). The `404`-for-any-failure cut in "Cut, knowingly" is marked resolved
-| 2026-10-29 | ~0.2 h | Answered why the upload takes `folders` as well as `files`: an empty folder has no multipart representation, and folding it into `files` as an empty part would make it indistinguishable from the sample material's zero-byte `empty-note.txt`, which must become a document with one part. Demonstrated both in one request against the container. No code change; the reasoning and the two refused one-parameter alternatives (zip body, trailing-slash marker) written into `DECISIONS.md` and `docs/upload-requirements.md`. Also noticed the container had exited 0 on its own despite `restart: unless-stopped` — recorded under "Open debt", not yet diagnosed |
-| 2026-10-29 | ~0.2 h | Weighed renaming `folders` to `emptyFolders` and refused it: the parameter also carries nested folders, which usually hold files, so the name would misdescribe `delivery-2026-03/archive`. Corrected my own overstatement from the previous entry that it exists only for empty folders. Confirmed against the container that naming a folder which has files is a no-op, and that a named nested folder gets its own `Skipped` row beside its files'. Rewrote the `Folders` / `FolderPaths` summaries, which had said only that folders holding no file "need to be listed" — true but hiding the second use |
-| 2026-10-29 | ~0.1 h | Found a third stale claim while checking the refusal shapes: `README.md` and `DECISIONS.md` both said `SuppressModelStateInvalidFilter` is on, and nothing in the solution sets it — a missing `field` answers ASP.NET's automatic `ValidationProblemDetails`. Left the behaviour as it is (the argument for suppressing it assumed every other refusal was `404`, which stopped being true) and corrected both documents; the two different `400` bodies are now written down as something the client has to know |
-| 2026-10-29 | ~0.5 h | Merged `LoggingDocumentStore` into `DocumentsStoreService` at request, after putting the choice back: the decorator existed only to dodge `Core`'s no-package rule, so `Core_declares_no_package_references` became `Core_declares_only_allowed_package_references` with `Microsoft.Extensions.Logging.Abstractions` as the single allowed name, rather than moving the store out to `Infrastructure` and reversing "storing is what a document archive does". `Prepare` is now `static` so registration can still fail startup on an unusable root before any container exists to resolve a logger from. Tests moved to `Core.Tests/Documents/DocumentsStoreServiceTests.cs` against a temp directory (5, from 4; suite 70) and the mutation re-checked — deleting the whole `catch` arm fails exactly the one test, and deleting only the `LogError` does not compile. Verified in the container: the log category is now the store's own, `empty-folder` logs `0 part(s)` against the file's `1` |
-| 2026-10-29 | ~0.2 h | Answered why `Prepare` is needed when the Dockerfile already does `mkdir -p /var/lib/archive`: the image layer holds an empty directory (shown with `podman run --entrypoint ls`), a volume replaces that path at runtime, `tmp/` is what the readiness probe writes into — deleting it from the running container gives `503` until a restart — and running from source has no Dockerfile at all. Also demonstrated the sweep: a planted `tmp/abandoned-upload` is gone after a restart. Written into `DECISIONS.md` and `AGENTS.md`; no code change |
-| 2026-10-30 | ~0.3 h | Audited the brief against the code to answer "are we done apart from Export and the UI". Answer: no — the Archive is missing a part-content endpoint, index-value updates, the date-range filter and `GET /cabinets`, has no CORS policy, and still has zero tests over the folder→document upload rules (the brief's priority 1). The first two block the Export service, so they precede it. Counted the suite by class to get the coverage claim right (9 architecture + 31 loader + 25 field rules + 5 store), and rewrote "What is built, what is missing" as a table with how each gap would be done. No code change |
-| 2026-10-30 | ~0.2 h | Fixed a broken build: `DocumentPage` and `FieldViolation` were absent from the working tree, so eleven files in `Core` would not compile. Traced it to the merge at `HEAD` (`6f0ae8f`), which took the deleting side of `660a26b` — a 28-file, 843-deletion commit from `origin/main`. Restored both from `d1fc81b`, then checked every other path that commit deleted: all of them are old locations the Core restructure superseded (`Ports/` → `Services/Interfaces/`, `Domain/IndexFields/` → `Validation/IndexFields/`, the deliberately merged `*Draft` types), each with a live counterpart. The cancellation guard in `AddAsync` had also gone missing for the second time and was restored again, which is what the suite caught |
-| 2026-10-30 | ~1.4 h | Removed the `TestSupport` project and raised coverage from 70 tests to 281 (98.9% of lines; Api 99.4%, Core 98.6%, Infrastructure 100%). `TestCabinets` moved to `Core.Tests` and `RepositoryLayout` to `Api.Tests`; the fixture-drift guard that the split would have destroyed was rebuilt on both sides. New: 32 tests for the folder→document upload rules (the brief's priority 1, previously uncovered), 23 for `UploadService` including the partial-failure rule, 25 more for the store (round trip, paging, system fields, untrusted cabinet names, `Prepare`, `CanWrite`), the catalog, the domain validation rules, every mapping, the paging arithmetic, the status middleware, and 27 endpoint tests that boot the real service with `WebApplicationFactory`. No production code was touched, per the instruction: where a test and the code disagreed — the store logging a cancelled upload at `Error` — the test now states the behaviour and `DECISIONS.md` is corrected instead. Found `UploadEntry.Failed` to be dead code and left it, flagged |
-| 2026-10-30 | ~0.5 h | Created the `Nemetschek.Export` folder and its six projects — Core, Infrastructure, Api and one test project each — mirroring the Archive's shape, with the shared build settings left to `Directory.Build.props` and package versions kept in step. No export rule is implemented. Wired the project references, added all six to `Nemetschek.sln`, and extended the solution-wide architecture tests with seven Export rules (including the reverse isolation rule and `Both_services_have_the_same_shape`), so the new layering is enforced from the first commit rather than described. The Api scaffold serves OpenAPI and liveness and has four tests that boot the real host through `WebApplicationFactory`; readiness was left out on purpose, since it has to mean "the Archive is reachable" and a readiness endpoint that checks nothing would make a dependent service wait on a lie. The two empty test projects carry one skipped, reasoned placeholder each so `dotnet test` reads as work owed instead of printing "No test is available". 292 passing, 2 skipped |
-| 2026-10-30 | ~0.1 h | Deleted the stray `NUL` file from the repository root: 99 bytes holding an SSH `known_hosts` line for `[localhost]:56630`, written when a command redirected to `NUL` under Git Bash, which creates a real file instead of the null device. Public host key only, no private material, and untracked. Checked afterwards that the root holds nothing else unexpected and that the new Export projects' `bin/`/`obj/` are covered by `.gitignore`, so the twelve source files are all that is left to commit |
-| 2026-10-30 | ~0.2 h | Stripped every non-`<summary>` comment from the test projects at request, continuing a sweep already started by hand: 168 lines across 19 files, leaving the XML doc blocks and tidying the blank lines the removals left behind. The repository-wide convention "no comments except `<summary>` blocks" already said this and the new tests had ignored it, so the convention bullet in `AGENTS.md` now states that it covers test code too. One thing had to be rehoused rather than deleted: the checklist of the brief's seven export rules lived in a comment in `ExportRulesTests`, and three documents pointed at it — the list is now in `DECISIONS.md` under "The Export service's projects", where the conventions put a checklist, and the pointers retargeted. 292 passing, 2 skipped, 0 warnings |
+| 2026-10-28 | ~1.5 h | Read the brief and the fixtures, wrote the upload requirements analysis, assessed the .NET Core 2.0 scaffold and agreed the architecture. Rebuilt the solution on .NET 9 with the layered split and the dependency rules enforced by tests. |
+| 2026-10-28 | ~1.3 h | The `cabinets.json` loader: validation moved onto the DTOs as DataAnnotations, which removed eleven hand-written guard methods; SDK exception types instead of a custom one; fail-fast startup. |
+| 2026-10-28 | ~1.5 h | Split one test project into one per production project plus a shared `TestSupport`, wrote the architecture tests that enforce the layering, and closed three rules that had no test. Dockerfile, `.dockerignore` and the first compose file — unverified, no engine available yet. |
+| 2026-10-29 | ~3.0 h | Built the upload path end to end: document model, `IDocumentStore`, the folder-to-document planner, `RelativePath`, `UploadService`, the multipart contracts and `CabinetsController`. Verified by hand against the real sample material and every refusal path. Repaired a non-compiling `HEAD` on the way (restored `FieldType.Date` and four deleted tests, fixed a missing `[JsonPropertyName]` that had made every field read-only). |
+| 2026-10-29 | ~2.0 h | Settled storage — files on a volume, no database — and built it: the directory-as-index layout, `document.json`, atomic commit by rename, `tmp/` swept at startup, the required `Archive:StoragePath`, a storage readiness check, and the paged read. Verified that a cold restart keeps every document and that two uploads of the same folder coexist. |
+| 2026-10-29 | ~2.5 h | Several rounds of consolidation at review pace: merged `DocumentDraft`/`PartDraft` into `Document`/`Part`, `PlannedDocument` + `UploadEntryResult` into `UploadEntry`, folded `ArchiveStorageLayout` into the store, replaced the status middleware with `ArchiveExceptionMiddleware`, restructured `Core` by entity and `Contracts/` by entity, and refused AutoMapper on licence and fit. |
+| 2026-10-29 | ~3.5 h | Containers, the hard way. Diagnosed `podman-compose`'s two Windows bugs, uninstalled and reinstalled Podman, established that `podman compose` (the Docker Compose v2 binary) works as the single command, and traced where the named volume actually lives. **First successful build and run of the image**, with the upload round trip and a destroy/recreate both verified. |
+| 2026-10-29 | ~1.7 h | Container-only configuration: every setting through compose, `.env` for the tunables, `no-new-privileges`, `stop_grace_period`, and `appsettings.json` documenting the full set. Verified each `Archive__*` name binds by running with exactly the variables compose sets. |
+| 2026-10-30 | ~1.0 h | Diagnosed "nothing is logged": the pipe was fine, but `Microsoft.AspNetCore` was pinned to `Warning` and the solution held three `ILogger` calls, two of them at startup. Added HTTP logging (one line per request, no bodies, `/health` excluded) and a store failure at `Error`. Traced the missing failure log to the `UploadFailureStatusMiddleware` retirement and found three documented behaviours the code had stopped doing. |
+| 2026-10-30 | ~1.6 h | Removed `TestSupport` and took the suite from 70 tests to 281 (98.9% of lines): the folder-to-document rules, `UploadService` including partial failure, the store against a temp directory, the mappings, the paging arithmetic, the status middleware, and endpoint tests that boot the real service. Rebuilt the fixture-drift guard the removal would have destroyed. |
+| 2026-10-30 | ~0.5 h | Created `Nemetschek.Export` — six projects, same shape as the Archive — and extended the architecture tests with the Export's layering rules so the boundary is enforced from the first commit. |
+| 2026-10-30 | ~3.5 h | Implemented the Export service and the three Archive routes it needs: the date-range filter, a part's content streamed, and index values written back. Zip layout, the duplicate-title rule, the marker, the paging client with its own DTOs, the `502`/`400` split, and compose running both services. Ran the brief's round trip — sample material twice, exported, unpacked, 15 of 16 entries byte-identical. An endpoint test caught that `ZipArchive` cannot stream into a response body. |
+| 2026-10-30 | ~1.3 h | Review pass over the Export at request: `WriteAsync` returns the archive as a stream, the marker became one batch request after the zip is closed (24 `PATCH`es to 1), the per-document route was removed, the helpers folded into `ExportService`, and the refusal collection moved into `IndexFieldRules`. |
+| 2026-10-30 | ~1.4 h | Split `DocumentsStoreService` (379 lines, 21 members) into the layout utils, the storage root and the metadata file, leaving the port's five operations. Removed `.env` and `docker-compose.override.yml` for one literal compose file — keeping `name:`, without which the Archive would have come up against an empty volume. |
+| 2026-10-30 | ~1.1 h | Answered review questions with evidence rather than opinion: why `folders` is not `emptyFolders`, why `Prepare` is needed when the Dockerfile makes the directory, whether the export loads files into memory (measured: 200 MiB through a 12 MB rise), whether the time zone can go (measured: 24 / 35 / 0 documents for the same request in three zones), and why an export of `Status` returns `400` (the marker is 22 characters; the field holds 12). |
+| 2026-10-30 | ~1.0 h | Two comment sweeps — 168 lines out of the test projects, then 95 out of all 114 source files — rehousing the one rule that lived only in a comment. Reorganised the top-level documents into `docs/` and condensed them. |
+| 2026-10-30 | ~0.5 h | Reorganised the documents: the brief and the decision log moved to `TASK.md` and `DECISIONS.md`, with all 58 cross-references rewritten and every markdown link checked to resolve. `AGENTS.md` and `CLAUDE.md` stayed at the root deliberately — both are discovered there by convention, and the brief tests the instructions by handing an agent an unseen change, which fails if `AGENTS.md` is not where an agent looks. Condensed as well as moved: the decision log lost its seven struck-through superseded blocks (collapsed into the decision that stands, keeping the reasoning that still decides things) and its 64 one-row-per-prompt time entries became 16 grouped per session, with the per-day totals unchanged at 4.3 / 12.7 / 11.4 h. `AGENTS.md`'s verify section was rewritten around the round trip, and "The upload endpoint" in `DECISIONS.md` stopped claiming the upload rules have no tests — its checklist is now ticked, naming the test files. 1348 lines of decisions became 1240, 195 of upload notes became 109 |
+| 2026-10-31 | ~0.4 h | Deleted the `docs/` folder. Flagged first that two of its four files were not reiterations: `task.md` is the given brief every other document cites, and `decisions.md` is a named hand-in deliverable — so both moved back to the root as `TASK.md` and `DECISIONS.md`, which is where the brief names them, and the folder went with the two requirement notes. Before deleting those, folded the three things recorded only in them into `DECISIONS.md`: the sample-material mapping tree the upload rules are stated about, the three streaming hops with the 200 MiB measurement, and the export's three non-promises (no resume, no export history, a document stored mid-export may or may not appear). Rewrote every reference, deduplicated the README's documentation map, and checked every markdown link resolves. Five documents at the root, 421 tests, 0 warnings |
+| 2026-10-31 | ~0.2 h | `IDocumentStore.SetIndexValuesAsync` returns `Task` instead of `Task<Document?>`. Its only caller used the result as a null check, and `DocumentsService` already resolves every id before writing, so the count it answers with is simply the id count. The five store tests that asserted on the returned document now read it back with `FindAsync` instead — a better assertion, since it proves the change reached disk rather than that an in-memory copy was built. The missing-document test now also checks a sibling document was left alone and nothing was staged. 421 tests, 0 warnings |
+| 2026-10-31 | ~0.4 h | Made the store report its own failures: `FindAsync`, `OpenPartAsync` and `SetIndexValuesAsync` throw `DocumentNotFoundException` instead of returning `null`, with the private directory lookup throwing once so all three lose their `is not { } directory` checks. `DocumentsService` dropped every conditional with them — `OpenPartAsync` is now a one-line delegation and the batch write is two plain loops. Found on the way that the batch's two passes had been merged into one, which had quietly dropped "resolve every id before writing any"; restored them, so a bad id still leaves the good documents untouched. Five tests that asserted `null` now assert the refusal, one of them also checking a sibling document was left alone and nothing staged. 421 tests, 0 warnings; the endpoint tests confirm the routes still answer `404` rather than `500` |
+| 2026-10-31 | ~0.3 h | Followed a hand cleanup of `DocumentsStoreService` through the tests. `Document.ToStore` was gone, so the 14 call sites across four test files became object initialisers, matching what `UploadPlanningService` now does; the three that then reached for `with { Id = ... }` set `Id` in the initialiser instead. Reading the diff rather than the build status found the cleanup had also turned `StoredAtOf(directory)` into `StoredAtOf(day)`, which disabled the instant filter without failing a single test — fixed, and covered by a window that starts midday. 422 tests, 0 warnings |
+| 2026-10-31 | ~0.2 h | Fixed `ArchiveHttpClient.ReadDocumentsAsync`, which was asking for one page past the end: the loop tested `read < page.Total` only after fetching, so the condition was judged against a page already requested. It now breaks on `read >= page.Total` after yielding, keeping `Documents.Count > 0` for a total the Archive cannot deliver. Found by running the whole suite rather than the project being worked on — two Export tests had turned red mid-session. 422 tests, 0 warnings |
+| 2026-10-31 | ~0.4 h | Removed health checking from both services on instruction: the two endpoints each, the three checks behind them, the compose `healthcheck` blocks, the `service_healthy` gate, and the `apt-get` layer that existed only to put `curl` in the runtime images for it. `DocumentStorageRoot.CanWrite` went too — the storage probe was its only caller. 11 tests removed with the behaviour they pinned; 411 remain, 0 warnings. Recorded what the gating bought, since the brief's "services may start in any order" is now answered by the Export's `502` alone. |
+| 2026-11-01 | ~0.6 h | Built `GET /cabinets`, the last Archive gap: every cabinet with its fields, each answering `type`, `maxLength`, `writable` and `choosable`. `choosable` exists so a client's upload-field and marker-field pickers do not restate "writable and text" — `Cabinet.WritableTextFields` put on the wire. Then split the five-action `CabinetsController` into one controller per entity, routes unchanged; the existing endpoint tests passing against the same URLs is the proof. 23 new tests (mapping and endpoint), and a mutation that makes every field choosable fails 7 of them. 434 tests, 0 warnings |

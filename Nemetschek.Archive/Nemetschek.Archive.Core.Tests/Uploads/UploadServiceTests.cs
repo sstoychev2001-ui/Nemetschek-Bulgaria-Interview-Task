@@ -269,20 +269,20 @@ public sealed class UploadServiceTests
             CancellationToken cancellationToken) =>
             Task.FromResult(new DocumentPage([], 0));
 
-        public Task<Document?> FindAsync(
+        public Task<Document> FindAsync(
             string cabinetName,
             Guid documentId,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException("An upload does not read documents back.");
 
-        public Task<Stream?> OpenPartAsync(
+        public Task<Stream> OpenPartAsync(
             string cabinetName,
             Guid documentId,
             Guid partId,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException("An upload does not read part content.");
 
-        public Task<Document?> SetIndexValuesAsync(
+        public Task SetIndexValuesAsync(
             string cabinetName,
             Guid documentId,
             IReadOnlyDictionary<string, IndexValue> values,

@@ -6,9 +6,6 @@ namespace Nemetschek.Archive.Api.Contracts.Documents.Requests;
 /// <summary>
 /// One index value on the way in: the type it claims to be, and its value as text.
 /// </summary>
-// The value travels as a string for every type, because a bare "2026-03-01" cannot say whether it
-// is a date or text, and a client that sends 1.10 as a JSON number has already lost the trailing
-// zero. The type says how to read it; IndexFieldRules then checks it against the field.
 public sealed class IndexValueRequest : IValidatableObject
 {
     /// <summary>Whether the value is text, a number or a date.</summary>

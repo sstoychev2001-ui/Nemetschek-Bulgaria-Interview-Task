@@ -123,24 +123,6 @@ public sealed class ExportEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task Readiness_is_unhealthy_while_the_Archive_cannot_be_reached()
-    {
-        // The base address this test host is given does not resolve, which is exactly the state a
-        // dependent service must not be told is ready.
-        var response = await client.GetAsync("/health/ready", Token);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Liveness_answers_without_reaching_the_Archive()
-    {
-        var response = await client.GetAsync("/health", Token);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    [Fact]
     public async Task The_service_describes_its_export_endpoint_in_OpenAPI()
     {
         var response = await client.GetAsync("/openapi/v1.json", Token);
