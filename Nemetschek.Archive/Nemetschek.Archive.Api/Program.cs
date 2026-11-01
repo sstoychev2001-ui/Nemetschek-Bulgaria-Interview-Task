@@ -44,6 +44,24 @@ builder.Services.AddScoped<UploadService>();
 builder.Services.AddSingleton(
     new PagingLimits(builder.Configuration.GetValue("Archive:MaxPageSize", 50)));
 
+var allowedOrigins = (builder.Configuration["Archive:AllowedOrigins"] ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+{
+    policy.AllowAnyMethod()
+        .AllowAnyHeader();
+
+    if (allowedOrigins.Length == 0)
+    {
+        policy.AllowAnyOrigin();
+    }
+    else
+    {
+        policy.WithOrigins(allowedOrigins);
+    }
+}));
+
 var maxUploadBytes = builder.Configuration.GetValue("Archive:MaxUploadBytes", 256L * 1024 * 1024);
 var maxUploadEntries = builder.Configuration.GetValue("Archive:MaxUploadEntries", 10_000);
 
@@ -61,6 +79,8 @@ app.Logger.LogInformation("Loaded cabinet definitions from {CabinetsFile}", reso
 app.Logger.LogInformation("Storing documents under {StoragePath}", resolvedStoragePath);
 
 app.UseHttpLogging();
+
+app.UseCors();
 
 app.UseExceptionHandler();
 app.UseMiddleware<ArchiveExceptionMiddleware>();

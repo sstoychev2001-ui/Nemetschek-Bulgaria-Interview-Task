@@ -19,6 +19,7 @@ services:
       Archive__MaxPageSize: 50
       Archive__MaxUploadBytes: 268435456
       Archive__MaxUploadEntries: 10000
+      Archive__AllowedOrigins: ""
     volumes:
       - ./fixtures:/app/fixtures:ro
       - archive-data:/var/lib/archive
@@ -38,6 +39,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Export__ArchiveBaseAddress: http://archive-api:8080
+      Export__AllowedOrigins: ""
     ports:
       - "8081:8080"
     depends_on:

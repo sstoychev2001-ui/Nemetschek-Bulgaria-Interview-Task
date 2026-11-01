@@ -401,6 +401,8 @@ in the volume today are from an upload after that reinstall, not the original tw
 | `Archive:MaxUploadBytes` | Archive | Largest upload body accepted, in bytes. Default 268435456 (256 MiB). |
 | `Archive:MaxUploadEntries` | Archive | Most parts accepted in one multipart body. Default 10000. |
 | `Archive:MaxPageSize` | Archive | Most documents one page may hold. Default 50; the review demo runs with 5. |
+| `Archive:AllowedOrigins` | Archive | Origins a browser client may call from, comma-separated — `http://localhost:5173,https://client.example`. **Unset means any origin**, which is what the demo wants: nothing here is authenticated and no cookie is read, so there is no credential for a hostile page to borrow. Set it to pin the client's host. |
+| `Export:AllowedOrigins` | Export | The same, for the Export service. It also exposes `Content-Disposition`, so a cross-origin client can read the zip's file name off the response instead of inventing one. |
 | `Export:ArchiveBaseAddress` | Export | **Required.** The Archive's HTTP base address, such as `http://archive-api:8080`. The service refuses to start without it, and refuses an address that is not absolute. There is no default on purpose: the Export reaches the Archive over HTTP and nothing else, so a wrong or missing address has to fail at startup rather than at the first export. |
 
 Every setting can be supplied as an environment variable using ASP.NET Core's double-underscore form,

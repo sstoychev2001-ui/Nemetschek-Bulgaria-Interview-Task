@@ -24,9 +24,30 @@ var archiveBaseAddress = builder.Configuration["Export:ArchiveBaseAddress"]
 
 builder.Services.AddArchiveClient(archiveBaseAddress);
 
+var allowedOrigins = (builder.Configuration["Export:AllowedOrigins"] ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+{
+    policy.AllowAnyMethod()
+        .AllowAnyHeader()
+        .WithExposedHeaders("Content-Disposition");
+
+    if (allowedOrigins.Length == 0)
+    {
+        policy.AllowAnyOrigin();
+    }
+    else
+    {
+        policy.WithOrigins(allowedOrigins);
+    }
+}));
+
 var app = builder.Build();
 
 app.UseHttpLogging();
+
+app.UseCors();
 
 app.UseExceptionHandler();
 app.UseMiddleware<ExportExceptionMiddleware>();
