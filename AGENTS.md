@@ -42,42 +42,50 @@ Nemetschek.Archive/
 ├── Nemetschek.Archive.Infrastructure/   composition and the edges of the container
 │   ├── Cabinets/    CabinetsFileLoader — reads the deployment's cabinets.json
 │   └── *ServiceCollectionExtensions — the dependency registrations
-├── Nemetschek.Archive.Core.Tests/        one test project per production project
-│   ├── Cabinets/    TestCabinets (the fixture in code) + the test that keeps it honest
-│   ├── Domain/      the rules each domain type declares on itself
-│   ├── Documents/   the store, against a temp directory
-│   └── Uploads/     the folder→document rules, and running an upload
-├── Nemetschek.Archive.Infrastructure.Tests/  the loader, path resolution and the DI wiring
+├── Nemetschek.Archive.Core.Tests/        folder for folder with the project it tests
+│   ├── Domain/      Documents/, IndexFields/ — the rules each type declares on itself
+│   ├── Services/    Cabinets/, Documents/ (the store against a temp directory), Uploads/
+│   ├── Validation/  Documents/ (CalendarRange), IndexFields/ (IndexFieldRules)
+│   └── Utils/       Documents/ mirrors the production utils; beside it TestCabinets
+├── Nemetschek.Archive.Infrastructure.Tests/  the cabinets loader and path resolution
 └── Nemetschek.Archive.Api.Tests/
-    ├── Architecture/  the solution-wide dependency rules, and RepositoryLayout
-    ├── Contracts/     paging arithmetic and every mapping
-    ├── Endpoints/     the real service in process, via WebApplicationFactory
-    └── Middleware/    the one place that picks a status code
+    ├── Architecture/  this service's dependency rules
+    ├── Contracts/     mirrors Contracts/ — Cabinets/Mappings, Documents/{Mappings,Requests}, …
+    ├── Middleware/    the one place that picks a status code, over a mocked IProblemDetailsService
+    └── Utils/         RepositoryLayout
 Nemetschek.Export/                       same shape as the Archive
 ├── Nemetschek.Export.Api/               ExportsController, DTOs, ExportExceptionMiddleware, OpenAPI
 ├── Nemetschek.Export.Core/              the export rules — abstractions-only packages, allowlisted
 │   ├── Domain/Exports/     ArchiveDocument, ArchivePart, ExportRequest
 │   ├── Services/Exports/   ExportService — the rules, the naming and the marker in one class
 │   └── Clients/            ArchiveHttpClient, the only way to the Archive
-│       ├── Interfaces/     IArchiveClient — the seam a test fake replaces
+│       ├── Interfaces/     IArchiveClient — the seam the export tests mock
 │       ├── Requests/       IndexValuesBatchRequest — the batch marker write
 │       └── Responses/      ArchiveDocumentPageResponse — the page envelope, transport only
 ├── Nemetschek.Export.Infrastructure/    AddArchiveClient — the HttpClient and its base address
-├── Nemetschek.Export.Core.Tests/        one test project per production project
-├── Nemetschek.Export.Infrastructure.Tests/
-└── Nemetschek.Export.Api.Tests/         boots the scaffold through WebApplicationFactory
+├── Nemetschek.Export.Core.Tests/        Clients/, Services/Exports/ — folder for folder again
+├── Nemetschek.Export.Infrastructure.Tests/   ServiceRegistrationTests, as the registration is at the root
+└── Nemetschek.Export.Api.Tests/         Architecture/ only — the endpoint tests booted a host
 ```
 
 **One test project per production project**, named `<Project>.Tests` and referencing only its
-subject. There is no shared test-helper project: `TestSupport` was removed, and a helper now lives
-in the one project that needs it — `TestCabinets` in `Core.Tests`, `RepositoryLayout` in
-`Api.Tests`, and a four-line `RepositoryFixtures` duplicated in the two projects that only need the
-fixture path. Both project rules are enforced:
-`Each_test_project_references_the_project_it_tests` and
-`No_production_project_references_a_test_project`.
+subject, **and a test file sits at its subject's path** — `Core/Services/Documents/
+DocumentsStoreService.cs` is tested by `Core.Tests/Services/Documents/DocumentsStoreServiceTests.cs`,
+with the namespace following the folder. Two folders are exempt and are meant to be:
+`Api.Tests/Architecture/`, which tests the service's dependency rules rather than any one file, and
+`Utils/`, which holds **every class in a test project that is not a test** — `RepositoryLayout`,
+`RepositoryFixtures` and `TestCabinets`. A helper goes there, never beside the test that happens to
+use it first. (In
+`Core.Tests` that folder does double duty: `Utils/Documents/` mirrors the production `Utils/`, and
+the loose files beside it are the suite's own.)
 
-A test project may take a package the project it tests does not — `Mvc.Testing` in `Api.Tests`,
-`DependencyInjection` and `Logging` in `Infrastructure.Tests`. Only `Core` has an allowlist.
+There is no shared test-helper project: `TestSupport` was removed, and a helper now lives in the one
+project that needs it, duplicated where two do — `RepositoryLayout` in both `Api.Tests`, and a
+four-line `RepositoryFixtures` in the two projects that only need the fixture path. The pairing of
+a test project to its subject is enforced by `Each_test_project_references_the_project_it_tests`.
+
+A test project may take a package the project it tests does not — `Moq` wherever a dependency is
+mocked, `DependencyInjection` and `Logging` in `Infrastructure.Tests`. Only `Core` has an allowlist.
 
 Project references: `Api → Infrastructure → Core`, and `Api → Core`. **`Core` references no other
 project**, and takes a NuGet package only from the allowlist in
@@ -88,12 +96,18 @@ disk, clock or socket behind it belongs in `Infrastructure`.
 Nothing under `Nemetschek.Archive.*` may reference `Nemetschek.Export.*`, or the reverse. The Export
 service reaches the Archive over HTTP only, with its own client DTOs. That duplication is deliberate.
 
-**These rules are enforced by tests, not by trust** — see
-`Nemetschek.Archive.Api.Tests/Architecture/ProjectDependencyTests.cs`, which covers **both**
-services. It reads csproj files rather than referencing projects, so one place can enforce the
-layering of each service without either depending on the other. It reads the real csproj files, so a
-cross-layer or cross-service reference fails `dotnet test`. If one of those tests fails, the fix is
-almost always to move the code, not to change the test.
+**These rules are enforced by tests, not by trust** — and **each service enforces its own**, in
+`<Service>.Api.Tests/Architecture/ProjectDependencyTests.cs`. The two files are mirrors: same nine
+rules, each scoped to its own project prefix, so neither mentions the other service's projects. They
+read the real csproj files rather than referencing projects, which is what lets a service check its
+own layering without depending on anything — including on the other service's test helper, so
+`RepositoryLayout` is deliberately duplicated into both. A cross-layer or cross-service reference
+fails `dotnet test`. If one of those tests fails, the fix is almost always to move the code, not to
+change the test.
+
+Adding a rule means adding it to both files. The guard that keeps that honest is in `Projects(…)`:
+it asserts the prefix matched something, because five of the nine rules are loops and a filter that
+matched nothing would make them pass for free.
 
 **One solution at the root covers every service.** Per-service solutions were considered and rejected: a
 `.sln` is only a list of projects for tooling and does not enforce a boundary (a `ProjectReference`
@@ -157,11 +171,34 @@ rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` 
   a cancelled upload at `Error` is the live example.
 - **A skipped test is how an owed rule is recorded, not how a failing one is silenced.** There are
   none left — the Export placeholders were replaced by the real rule tests — but if you add one,
-  give the `Skip` a reason naming what is missing. Never add `Skip` to a test that used to pass.
-- **An endpoint is tested through the real service.** `Api.Tests/Endpoints/ArchiveApplication.cs` is
-  a `WebApplicationFactory` over `Program.cs` on a temp storage directory, so the statuses, the
-  error shapes and the page cap are covered as a caller sees them, with no container and no
-  network. Add an endpoint, add a row there.
+  give the `[Ignore]` a reason naming what is missing. Never add `[Ignore]` to a test that used to
+  pass.
+- **The test framework is MSTest**, `[TestClass]` / `[TestMethod]`, plain assertions and no
+  assertion DSL. Four of its assertions do not read the way the xUnit equivalents did, and getting
+  them wrong is silent rather than loud, so they are worth knowing before you write one:
+  - **A sequence is compared with `CollectionAssert.AreEqual(expected, actual.ToArray())`.**
+    `Assert.AreEqual` on two `IEnumerable`s compiles and then compares references, so it passes for
+    the wrong reason. If you are asserting on more than one element, you want `CollectionAssert`.
+  - **`Assert.ContainsSingle`, `Contains` and `DoesNotContain` take the predicate first**, the
+    collection second — the opposite of xUnit. `ContainsSingle` returns the item.
+  - **`Assert.ThrowsExactly` / `ThrowsExactlyAsync` require the exact type**; `Throws` /
+    `ThrowsAsync` accept subclasses. Pick the one that states the rule you mean.
+  - **`Assert.IsInstanceOfType<T>(value, out var typed)`** is how you get the typed value; the
+    one-argument form returns `void`.
+- **The suite is unit tests only — nothing boots a host.** The `WebApplicationFactory` endpoint
+  tests were removed on 2026-11-02; a test may construct the class under test and its mocked
+  dependencies, and nothing more. What that gives up is recorded in `DECISIONS.md` under "The
+  endpoint tests were removed" — it is real, so verify an endpoint change by running the pair and
+  calling it, because no test does it for you any more.
+- **A test double is a `Mock<T>`, not a hand-written class.** `Moq` is referenced by every test
+  project that needs one. Capture what a mock was handed in a `List<…>` field via `Callback`, and
+  assert on call counts with `Verify`. Two shapes are worth copying rather than rediscovering:
+  mocking `ILogger<T>` needs `IsEnabled` set to `true` or the `Log*` extensions never reach `Log`,
+  and the rendered message is `invocation.Arguments[2]?.ToString()`.
+- **The class under test is a field, built in `[TestInitialize]`** — not a `private Service()`
+  factory called from each test. The exception is a test that genuinely needs a differently
+  configured dependency (`UploadServiceTests` passes its own store, because three of its rules are
+  about a store that fails); those keep a parameterised helper.
 - **`dotnet test` must pass from a clean clone with no network and no containers.** Rule tests run
   against `Core` with hand-written fixtures; nothing in the test project may need a database or Docker.
 - **A lookup that cannot answer throws; it does not return `null`.** `IDocumentStore.FindAsync`,
@@ -317,7 +354,7 @@ a moment before the first export.
 
 ```bash
 dotnet build          # warnings are errors
-dotnet test           # offline, no containers — 448 tests across six test projects
+dotnet test           # offline, no containers — 225 tests across six test projects
 docker compose up --build -d          # both services; give the Archive a moment before exporting
 
 # Running from source needs both paths, because neither is defaulted:

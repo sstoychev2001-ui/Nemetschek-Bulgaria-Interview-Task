@@ -1,52 +1,53 @@
-using Nemetschek.Archive.Core.Domain.Documents;
-
+using Nemetschek.Archive.Api.Tests.Utils;
 namespace Nemetschek.Archive.Api.Tests.Architecture;
 
 /// <summary>
-/// The dependency rules of the solution, enforced rather than described.
+/// The Archive's dependency rules, enforced rather than described. The Export's own rules are the
+/// mirror of these, in <c>Nemetschek.Export.Api.Tests/Architecture/</c>.
 /// </summary>
+[TestClass]
 public sealed class ProjectDependencyTests
 {
+    private const string Prefix = "Nemetschek.Archive";
+
     private const string Core = "Nemetschek.Archive.Core";
     private const string Infrastructure = "Nemetschek.Archive.Infrastructure";
     private const string Api = "Nemetschek.Archive.Api";
 
-    private const string ExportCore = "Nemetschek.Export.Core";
-    private const string ExportInfrastructure = "Nemetschek.Export.Infrastructure";
-    private const string ExportApi = "Nemetschek.Export.Api";
+    private static readonly string[] CorePackageAllowlist = ["Microsoft.Extensions.Logging.Abstractions"];
 
-    /// <summary>The only packages either service's `Core` may reference, named one by one.</summary>
-    private static readonly string[] CorePackageAllowlist =
-        ["Microsoft.Extensions.Logging.Abstractions"];
-
-    [Fact]
+    [TestMethod]
     public void Core_declares_only_allowed_package_references()
     {
-        Assert.Equal(CorePackageAllowlist, RepositoryLayout.PackageReferencesOf(Core));
+        CollectionAssert.AreEqual(CorePackageAllowlist, RepositoryLayout.PackageReferencesOf(Core).ToArray());
     }
 
-    [Fact]
+    [TestMethod]
     public void Core_declares_no_project_references()
     {
-        Assert.Empty(RepositoryLayout.ProjectReferencesOf(Core));
+        Assert.IsEmpty(RepositoryLayout.ProjectReferencesOf(Core));
     }
 
-    [Fact]
+    [TestMethod]
     public void Infrastructure_references_only_Core()
     {
-        Assert.Equal([Core], RepositoryLayout.ProjectReferencesOf(Infrastructure));
+        CollectionAssert.AreEqual(
+            new[] { Core },
+            RepositoryLayout.ProjectReferencesOf(Infrastructure).ToArray());
     }
 
-    [Fact]
+    [TestMethod]
     public void Api_references_only_Core_and_Infrastructure()
     {
-        Assert.Equal([Core, Infrastructure], RepositoryLayout.ProjectReferencesOf(Api));
+        CollectionAssert.AreEqual(
+            new[] { Core, Infrastructure },
+            RepositoryLayout.ProjectReferencesOf(Api).ToArray());
     }
 
-    [Fact]
+    [TestMethod]
     public void Dependencies_point_inward_only()
     {
-        foreach (var project in RepositoryLayout.ProductionProjects)
+        foreach (var project in Projects(RepositoryLayout.ProductionProjects))
         {
             var references = RepositoryLayout.ProjectReferencesOf(project);
 
@@ -59,10 +60,10 @@ public sealed class ProjectDependencyTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public void Each_test_project_references_the_project_it_tests()
     {
-        foreach (var testProject in RepositoryLayout.ProjectFiles.Keys
+        foreach (var testProject in Projects(RepositoryLayout.ProjectFiles.Keys)
                      .Where(name => name.EndsWith(".Tests", StringComparison.Ordinal)))
         {
             var subject = testProject[..^".Tests".Length];
@@ -71,104 +72,46 @@ public sealed class ProjectDependencyTests
         }
     }
 
-    [Fact]
-    public void No_production_project_references_a_test_project()
-    {
-        foreach (var project in RepositoryLayout.ProductionProjects)
-        {
-            Assert.DoesNotContain(
-                RepositoryLayout.ProjectReferencesOf(project),
-                reference => reference.EndsWith(".Tests", StringComparison.Ordinal) ||
-                             reference.EndsWith(".TestSupport", StringComparison.Ordinal));
-        }
-    }
-
-    [Fact]
+    [TestMethod]
     public void No_Archive_project_references_an_Export_project()
     {
-        foreach (var project in RepositoryLayout.ProjectFiles.Keys
-                     .Where(name => name.StartsWith("Nemetschek.Archive", StringComparison.Ordinal)))
+        foreach (var project in Projects(RepositoryLayout.ProjectFiles.Keys))
         {
             Assert.DoesNotContain(
-                RepositoryLayout.ProjectReferencesOf(project),
-                reference => reference.StartsWith("Nemetschek.Export", StringComparison.Ordinal));
+                reference => reference.StartsWith("Nemetschek.Export", StringComparison.Ordinal),
+                RepositoryLayout.ProjectReferencesOf(project));
         }
     }
 
-    [Fact]
-    public void Export_Core_declares_only_allowed_package_references()
-    {
-        Assert.Equal(CorePackageAllowlist, RepositoryLayout.PackageReferencesOf(ExportCore));
-    }
-
-    [Fact]
-    public void Export_Core_declares_no_project_references()
-    {
-        Assert.Empty(RepositoryLayout.ProjectReferencesOf(ExportCore));
-    }
-
-    [Fact]
-    public void Export_Infrastructure_references_only_Export_Core()
-    {
-        Assert.Equal([ExportCore], RepositoryLayout.ProjectReferencesOf(ExportInfrastructure));
-    }
-
-    [Fact]
-    public void Export_Api_references_only_Export_Core_and_Export_Infrastructure()
-    {
-        Assert.Equal(
-            [ExportCore, ExportInfrastructure],
-            RepositoryLayout.ProjectReferencesOf(ExportApi));
-    }
-
-    [Fact]
-    public void No_Export_project_references_an_Archive_project()
-    {
-        foreach (var project in RepositoryLayout.ProjectFiles.Keys
-                     .Where(name => name.StartsWith("Nemetschek.Export", StringComparison.Ordinal)))
-        {
-            Assert.DoesNotContain(
-                RepositoryLayout.ProjectReferencesOf(project),
-                reference => reference.StartsWith("Nemetschek.Archive", StringComparison.Ordinal));
-        }
-    }
-
-    [Fact]
-    public void Export_dependencies_point_inward_only()
-    {
-        foreach (var project in RepositoryLayout.ProductionProjects
-                     .Where(name => name.StartsWith("Nemetschek.Export", StringComparison.Ordinal)))
-        {
-            var references = RepositoryLayout.ProjectReferencesOf(project);
-
-            Assert.DoesNotContain(ExportApi, references);
-
-            if (project != ExportApi)
-            {
-                Assert.DoesNotContain(ExportInfrastructure, references);
-            }
-        }
-    }
-
-    [Fact]
-    public void Both_services_have_the_same_shape()
+    [TestMethod]
+    public void The_service_is_built_from_six_projects()
     {
         foreach (var suffix in new[] { ".Core", ".Infrastructure", ".Api", ".Core.Tests",
                      ".Infrastructure.Tests", ".Api.Tests" })
         {
-            Assert.Contains($"Nemetschek.Archive{suffix}", RepositoryLayout.ProjectFiles.Keys);
-            Assert.Contains($"Nemetschek.Export{suffix}", RepositoryLayout.ProjectFiles.Keys);
+            Assert.Contains($"{Prefix}{suffix}", RepositoryLayout.ProjectFiles.Keys);
         }
     }
 
-    [Fact]
-    public void Every_project_in_the_repository_is_in_the_solution()
+    [TestMethod]
+    public void Every_project_of_the_service_is_in_the_solution()
     {
         var solution = File.ReadAllText(RepositoryLayout.Path("Nemetschek.sln"));
 
-        foreach (var project in RepositoryLayout.ProjectFiles.Keys)
+        foreach (var project in Projects(RepositoryLayout.ProjectFiles.Keys))
         {
             Assert.Contains(project, solution, StringComparison.Ordinal);
         }
+    }
+
+    private static IReadOnlyList<string> Projects(IEnumerable<string> names)
+    {
+        var mine = names
+            .Where(name => name.StartsWith(Prefix, StringComparison.Ordinal))
+            .ToList();
+
+        Assert.IsNotEmpty(mine);
+
+        return mine;
     }
 }

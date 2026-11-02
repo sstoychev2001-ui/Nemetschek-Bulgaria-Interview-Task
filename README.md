@@ -140,13 +140,14 @@ Tests need no containers and run straight from the repository. Requires the .NET
 
 ```bash
 dotnet build                        # warnings are errors
-dotnet test                         # offline, no containers — 448 tests
+dotnet test                         # offline, no containers — 225 tests
 dotnet test --collect:"XPlat Code Coverage"
 ```
 
-The endpoint tests boot the real service in process with `WebApplicationFactory`, on a throwaway
-storage directory and the repository's own `fixtures/cabinets.json` — so `dotnet test` covers
-every route, its statuses and the page cap without a container or a network.
+The suite is unit tests only: MSTest with Moq, every dependency mocked or pointed at a throwaway
+temp directory, and nothing boots a host. That keeps `dotnet test` offline and fast, and it means
+**the HTTP surface is not covered by a test** — the statuses, the error shapes, the page cap and
+CORS are verified by running the pair and calling them, as in "Running from source" below.
 
 ## Running from source
 

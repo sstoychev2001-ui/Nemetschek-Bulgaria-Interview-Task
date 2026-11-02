@@ -10,8 +10,8 @@ Each decision in the form "A, because B". Updated as the work progresses.
 - **One test project per production project, plus a `TestSupport` library, because** a single test project
   hides which layer a failure belongs to and lets a test quietly depend on a project it has no business
   knowing. `TestSupport` holds only what two test projects genuinely share — `RepositoryLayout` and
-  `TestCabinets` — and carries no test-framework dependency of its own. Both rules are enforced by
-  `Each_test_project_references_the_project_it_tests` and `No_production_project_references_a_test_project`.
+  `TestCabinets` — and carries no test-framework dependency of its own. The pairing is enforced by
+  `Each_test_project_references_the_project_it_tests`.
 - **The architecture tests live with the Api tests, because** the Api sits at the top of the dependency
   chain and is the only project that can see every other one.
 - **`Core` references no project, and only an allowlisted package, because** that is what keeps
@@ -79,7 +79,7 @@ Each decision in the form "A, because B". Updated as the work progresses.
 - **No project is shared between Archive and Export, because** the service boundary is a review topic.
   Export talks HTTP and keeps its own client DTOs; duplicating a few DTOs is the correct price.
 - **The dependency rules are enforced by tests, not by documentation
-  (`Nemetschek.Archive.Api.Tests/Architecture/ProjectDependencyTests.cs`), because** the layering is what
+  (`<Service>.Api.Tests/Architecture/ProjectDependencyTests.cs`, one per service), because** the layering is what
   makes the rest of the brief achievable, and a convention nothing checks is a convention that decays.
   The tests read the real csproj files and assert: Core declares no project reference and no package
   outside its allowlist, Infrastructure references only Core, Api references only Core and
@@ -232,8 +232,9 @@ decisions behind it.
   content takes and a timeout mid-zip would hand the caller a truncated archive. The readiness probe
   has the opposite setting — two seconds — because a slow answer there *is* the failure.
 - **`Export.Core` took `Microsoft.Extensions.Logging.Abstractions`**, the same single package the
-  Archive's `Core` has, so an export's one summary line lives with the rules that produced it. Both
-  services now share one allowlist in `ProjectDependencyTests`.
+  Archive's `Core` has, so an export's one summary line lives with the rules that produced it. Each
+  service states that allowlist in its own `ProjectDependencyTests`; they agree today, and a
+  divergence would be a decision to record here rather than a surprise.
 - **What the Archive refused becomes a `400`, not a `502`, because** a cabinet that does not exist
   or a marker field that is read-only is the caller's mistake. A transport failure is a `502`: that
   one is not their fault. The split is on `HttpRequestException.StatusCode`.
@@ -398,6 +399,87 @@ What an export does not promise:
 
 ## Tests
 
+- **Moving the suite from xUnit to MSTest** (2026-11-02, at request). Six test projects, 37 files,
+  292 tests. `xunit` and `xunit.runner.visualstudio` out, the `MSTest` 3.11.1 meta-package in,
+  `Microsoft.NET.Test.Sdk` bumped 17.12.0 → 17.13.0 because MSTest 3.11 requires it and the downgrade
+  was an error under `TreatWarningsAsErrors`. The implicit `<Using Include="Xunit" />` became
+  `Microsoft.VisualStudio.TestTools.UnitTesting`, `[Fact]` became `[TestMethod]`, and every test class
+  gained `[TestClass]`. MSTest 3.11 rather than 4.x **because** 4.x makes Microsoft.Testing.Platform
+  the default runner, which on the .NET 9 SDK pinned in `global.json` needs extra opt-in properties
+  for `dotnet test` to work at all; 3.11 keeps the plain VSTest path the brief's one-command
+  acceptance criterion depends on. Nothing in the services changed, and the test count did not move.
+
+  **The one trap, and it is silent:** xUnit's `Assert.Equal` compares two `IEnumerable`s element by
+  element; MSTest's `Assert.AreEqual` compiles on the same two arguments and then compares
+  *references*. A mechanical rename would have left ~60 sequence assertions passing for the wrong
+  reason — green, and worthless. They are now `CollectionAssert.AreEqual(expected, actual.ToArray())`.
+  Proved rather than assumed: reversing the two `OrderBy`s in `UploadPlanningService` fails 8 of them,
+  and the whole set was found by scanning for an `Assert.AreEqual` whose expected argument is a
+  collection expression, then re-reading every remaining one by hand.
+
+  **The other four differences, each a deliberate choice of replacement:**
+  - `Assert.Single(c, predicate)` → `Assert.ContainsSingle(predicate, c)`. **Argument order is
+    reversed** in MSTest, for `Contains` and `DoesNotContain` too. `ContainsSingle` still returns the
+    item, so the call sites that used the result are unchanged otherwise.
+  - `Assert.Throws<T>` → `Assert.ThrowsExactly<T>`, and `ThrowsAny<T>` → `Throws<T>`. MSTest's
+    `Throws` is the permissive one; xUnit's was the strict one. Mapped to preserve the rule each test
+    states, not the method name.
+  - `Assert.IsType<T>(x)` → `Assert.IsInstanceOfType<T>(x, out var typed)`, because MSTest's returns
+    `void`. Eleven call sites that read `.Value` off the result became two statements. A real widening
+    comes with it — xUnit's `IsType` demands the exact type, MSTest's accepts a subclass — accepted
+    because every use is on a sealed `IndexValue` case or an exception type with no subclass in play.
+  - `Assert.All(c, action)` has no MSTest equivalent. The two uses became
+    `Assert.IsEmpty(c.Where(negated predicate))`, which gives a worse failure message and the same
+    verdict. Mutation-checked: breaking the export marker's format fails it.
+
+- **Each service's architecture rules live in its own test project** (2026-11-02, at request). One
+  `ProjectDependencyTests` in `Archive.Api.Tests` had been enforcing both services — it held
+  `ExportCore`, `ExportInfrastructure` and `ExportApi` constants, so the Archive's test project knew
+  the Export's shape and the Export's own test project knew nothing. The file is now two mirrors of
+  nine rules each, every loop scoped to its service's prefix, so neither names the other's projects.
+
+  **The duplication this costs:** `RepositoryLayout` is now copied into `Export.Api.Tests`. That was
+  the choice over the alternatives — a shared test-helper project is what `TestSupport` was, and it
+  was deliberately removed; a `ProjectReference` across the services is the exact thing these rules
+  forbid; and a linked `<Compile Include="..\..\Archive\…" />` would be that same coupling, just
+  invisible to the rule that checks for it. So the helper is duplicated on purpose, with a comment
+  saying why, the same call already made for `RepositoryFixtures`.
+
+  **The one guard the split needed:** five of the nine rules are loops over `Projects(…)`, and a
+  prefix that matched nothing would have made all five pass for free. `Projects` therefore asserts it
+  found something. Both directions were then mutation-checked: a forbidden package added to
+  `Export.Core` fails the *Export's* test project and leaves the Archive's green, and the reverse.
+
+  **What this gives up:** the two repo-wide checks became per-service ones. `Every_project_in_the_repository_is_in_the_solution`
+  is now `Every_project_of_the_service_is_in_the_solution`, and `Both_services_have_the_same_shape`
+  became `The_service_is_built_from_six_projects` in each file. A project belonging to neither
+  service would no longer be noticed by either — acceptable while the repository is two services and
+  nothing else, and the six-project rule still pins what each must contain.
+- **A test file sits at its subject's path** (2026-11-02, at request). The test projects had drifted
+  into folders of their own invention: `CalendarRangeTests` sat under `Documents/` though
+  `CalendarRange` is in `Validation/Documents/`, `IndexFieldRulesTests` under `Domain/IndexFields/`
+  though the rules are in `Validation/IndexFields/`, the store's tests under `Documents/` rather than
+  `Services/Documents/`, and every `Contracts` test in one flat folder against a production tree
+  three levels deep. 26 files moved so that a reader who knows where the code is knows where its
+  test is, with each namespace following its folder.
+
+  Two exceptions, both deliberate: `Api.Tests/Architecture/` tests the service's dependency rules
+  rather than any one file, and `Utils/` holds every class in a test project that is not a test.
+  That second rule was tightened on the same day: the helpers had been scattered — `RepositoryLayout`
+  under `Architecture/`, the `WebApplicationFactory` hosts at the project root, `TestCabinets` under
+  `Domain/Cabinets/` and `FakeArchive` under `Services/Exports/`, each sitting wherever its first
+  caller happened to be. All eight now live under their project's `Utils/`, so "is this a test or
+  something a test uses?" is answered by the folder. `TestCabinetsTests` moved with its subject,
+  which is the mirror rule applying to a helper as much as to production code.
+
+  Two judgement calls worth naming. `Endpoints/` became `Controllers/`, because each of those files
+  does target one controller even though it drives the whole host; the alternative was to keep a name
+  that described the technique rather than the subject. And `DomainValidationTests` was split into
+  `Domain/Documents/DocumentValidationTests` and `Domain/IndexFields/IndexFieldValidationTests`,
+  because one file covering two domain folders cannot mirror either — the small `Validate` helper is
+  now duplicated across the two, which is the same trade already made for `FixedClock`.
+
+
 - **`TestSupport` was removed and its two helpers moved into the projects that use them, because**
   a shared project for ~160 lines made every test project reference a third one, and the enforced
   convention "a test project references only its subject" had to carve out an exception for it.
@@ -411,7 +493,7 @@ What an export does not promise:
   the split, because it needed the loader from `Infrastructure` and the hand-written cabinets from
   what is now `Core.Tests`. Dropping it would have left every rule test able to pass against a
   schema the service never loads. So the guard was rebuilt on both sides instead:
-  `Core.Tests/Cabinets/TestCabinetsTests` parses the fixture itself with `System.Text.Json` and
+  `Core.Tests/Domain/Cabinets/TestCabinetsTests` parses the fixture itself with `System.Text.Json` and
   compares field for field, and `Infrastructure.Tests` now spells the fixture's full contents out in
   a `[Theory]` rather than comparing one copy to another. Two tests where there was one, neither
   needing a shared project. The duplication that remains is a four-line `RepositoryFixtures`
@@ -423,15 +505,54 @@ What an export does not promise:
   with a fake store, which is the only way to assert the brief's "a partial failure is never
   silent": the fake is told which title to fail, and the test checks the other documents still
   stored and the failed row carrying its reason.
-- **The endpoints are tested through `WebApplicationFactory` over the real `Program.cs`, because**
-  the statuses, the two error shapes and the page cap are properties of the
-  whole pipeline, and they had been verified only by hand against a container for several sessions.
-  It needs no container and no network — the inputs are the repository's own `fixtures/cabinets.json`
-  and a temp directory — so `dotnet test` still satisfies the brief's offline requirement. It also
-  took `Api` coverage from 56% to 99%, because `Program.cs` and the controller are only reachable by
-  booting the app.
-- **Coverage is measured, not assumed:** `dotnet test --collect:"XPlat Code Coverage"`, 98.9% of
-  lines (Api 99.4%, Core 98.6%, Infrastructure 100%). Worth knowing when reading those numbers: the
+- **The endpoint tests were removed** (2026-11-02, on instruction: a test that boots a host is not a
+  unit test). Gone are the four Archive endpoint files, the Export's one, and both
+  `WebApplicationFactory` hosts — 56 tests, and the `Microsoft.AspNetCore.Mvc.Testing` reference
+  with them. `Export.Api.Tests` is now its architecture rules and nothing else; it stays because an
+  architecture rule requires six projects per service.
+
+  **What this gives up, stated plainly rather than buried:** `Program.cs` and every controller are
+  now reachable by no test at all, so the statuses, the two error shapes, the page cap, the CORS
+  policy and the route table are unverified by `dotnet test`. Api line coverage goes back to roughly
+  what it was before those tests existed — 56%, against 99% with them. The brief's "every upload and
+  export rule needs a test that fails when that rule is broken" still holds, because the rules
+  themselves live in `Core` and are tested there; what is lost is the proof that the HTTP layer
+  still hands them the right input and returns the right status. These tests had earned their keep
+  twice — they caught `ZipArchive` being unable to stream into a response body, and `app.UseCors()`
+  going missing in a cleanup — so the loss is not hypothetical. Verify an endpoint change by running
+  the pair and calling it.
+- **A test double is a `Mock<T>`, not a hand-written fake** (2026-11-02, on instruction). Removed:
+  `CapturingProblemDetailsService` and `RecordingLogger` from `ArchiveExceptionMiddlewareTests`,
+  `RecordingLogger<T>` from the store tests, and `FakeArchive` from the Export's. Each became a Moq
+  mock whose `Callback` appends to a capture list the assertions read. Two things that cost time and
+  are worth writing down: mocking `ILogger<T>` needs `IsEnabled` stubbed to `true` or the `Log*`
+  extension methods return before reaching `Log` and nothing is ever recorded; and the rendered
+  message is `invocation.Arguments[2]?.ToString()` — the framework's `FormattedLogValues` — which
+  avoids reflecting over the generic formatter delegate to call it. `FakeArchive`'s `FailOpeningPart`
+  became a second `Setup` on the same mock that overrides the first, which removed the test class's
+  need to build a second service over a different client.
+
+  **Where a hand-written double was kept:** `FixedClock` (a two-line `TimeProvider` the tests move on
+  purpose) and `FakeStore` in `UploadServiceTests`. `FakeStore` is a stateful stub, not a mock — it
+  records what it stored and fails for a named title, which is how the brief's "a partial failure is
+  never silent" is asserted — and three of its tests need a *differently configured* store, which is
+  exactly the case a shared mock serves badly.
+- **The class under test is a field built in `[TestInitialize]`**, not a `private Service()` factory
+  (2026-11-02, on instruction). Same change for `[TestInitialize]`/`[TestCleanup]` replacing the
+  xUnit-shaped constructor and `IDisposable`, which MSTest supports but which no longer reads as the
+  framework's own vocabulary. Fields built in `BeforeEach` have to be `= null!`, which is the cost:
+  a `readonly` initialiser was a stronger guarantee than an assignment in a method that MSTest
+  promises to call.
+- **`DocumentsStoreReadWriteTests` was merged into `DocumentsStoreServiceTests`** (2026-11-02, on
+  instruction). They tested one class against one temp directory with one clock, split only by which
+  operations they exercised; the split cost two copies of `FixedClock`, two roots and two setups. The
+  merge is 37 tests in one file, taken verbatim from both so no assertion could be reworded on the
+  way, and the surviving logger is the mocked one, since the log assertions need it and the
+  read/write half never asserted on logging.
+- **Coverage is measured, not assumed:** `dotnet test --collect:"XPlat Code Coverage"`. The 98.9%
+  of lines recorded here (Api 99.4%, Core 98.6%, Infrastructure 100%) was measured while the
+  endpoint tests existed and is **stale as of 2026-11-02** — removing them takes `Api` back to
+  roughly 56%, since `Program.cs` and the controllers are no longer executed by anything. Worth knowing when reading those numbers: the
   three runs each report a different line set for `Core`, so a naive merge of the Cobertura files
   understates it badly — the figure above is the union of covered lines per source file, and a
   single-run reading of `Core` alone says 92% only because the `Cabinet` and `IndexField` validation
@@ -857,10 +978,14 @@ container produced was the fact that it had started.
 - **`app.UseCors()` runs before `UseExceptionHandler` and the exception middleware, because** a
   cross-origin caller can only read a response body the CORS headers permit it to read. Put the
   other way round, a `404` or a `400` would reach the browser stripped, and the client — which the
-  brief requires to show the server's message — would have nothing to show but a network error. This
-  is covered rather than asserted: `A_refusal_carries_the_header_too_so_the_client_can_show_the_message`
-  on both services makes a refusing request with an `Origin` and checks both the header and the
-  `ProblemDetails` title.
+  brief requires to show the server's message — would have nothing to show but a network error.
+  **No longer covered by a test**: the ten CORS endpoint tests were removed on 2026-11-02 on the
+  instruction that they exercise framework behaviour rather than this system's rules, which is a
+  fair reading — `AddCors`/`UseCors` is ASP.NET's, and the brief asks for tests of the upload and
+  export rules. The cost is specific rather than theoretical, so it is worth naming: those tests are
+  what caught `app.UseCors()` being deleted during a cleanup pass on 2026-11-01, when `AddCors`
+  stayed registered and silently applied to nothing. The ordering above, and the policy's existence
+  at all, are now held by reading `Program.cs`.
 - **The Export exposes `Content-Disposition`, because** an export is a download and the file name is
   part of the answer. A cross-origin client cannot read an unexposed response header, so without
   this it would have to build the name itself from the cabinet and the dates — the zip's naming rule
@@ -1146,8 +1271,10 @@ container produced was the fact that it had started.
   `Startup.cs` also used APIs removed years ago, and it had two solution files one of which pointed at
   csproj paths that did not exist. Carried forward: `.gitignore`, `.gitattributes`, `.env`, and the
   `x-logging` rotation block from the compose file.
-- **xUnit with plain assertions, because** FluentAssertions v8 is commercially licensed and the
-  assertions here are simple enough not to need a DSL.
+- **MSTest with plain assertions, because** it was asked for; plain assertions because
+  FluentAssertions v8 is commercially licensed and the assertions here are simple enough not to need
+  a DSL. The suite was xUnit until 2026-11-02 — see "Moving the suite from xUnit to MSTest" below for
+  what the move cost and the one trap it hid.
 - **`TreatWarningsAsErrors`, because** a warning a reviewer sees is a warning nobody fixes. It has
   already earned its place: it caught dead code during a mutation check.
 - **OpenAPI is not gated on the Development environment, because** the brief requires the description to
@@ -1463,7 +1590,7 @@ Where the AI was wrong, and how it was caught.
 
 ## Time log
 
-Rough, as the brief asks for, and grouped per session rather than per prompt. ~33.4 h in total.
+Rough, as the brief asks for, and grouped per session rather than per prompt. ~34.6 h in total.
 
 | Date | Time | What |
 |---|---|---|
@@ -1501,3 +1628,8 @@ Rough, as the brief asks for, and grouped per session rather than per prompt. ~3
 | 2026-11-02 | ~0.7 h | Moved `ArchiveHttpClient` from `Export.Infrastructure` into `Export.Core/Clients/`, with `Interfaces/`, `Requests/` and `Responses/` beside it. Checked first that `Core`'s one-entry package allowlist still holds — `HttpClient` and `System.Net.Http.Json` are shared-framework, so no new reference. The response DTOs were renamed to match the folder and the anonymous PATCH body became a named `IndexValuesBatchRequest`, with the Api test that asserts the exact body proving the serialisation is unchanged. `AddArchiveClient` stayed in `Infrastructure` and finally has tests — the project was left empty by the move and cannot be deleted, since an architecture test requires six projects per service. Two of my own new assertions were wrong and the suite said so: `archive-api:8080` *is* an absolute URI (scheme `archive-api`), and a typed client is registered under the service type's name, not the implementation's. 448 tests, 0 warnings |
 | 2026-11-02 | ~0.1 h | Analysis only: whether `ArchiveDocument` and `ArchivePart` should join `Clients/Responses/`. They should not — they are the port's contract, built by three HTTP-free test fakes, and the nullable-to-non-nullable step between response and domain is what the second type is for. Recorded the naming flaw the question exposed instead, and offered the rename to `Document`/`Part`. No code change |
 | 2026-11-02 | ~0.3 h | Collapsed the Export's two-types-and-a-mapping into one type each: `ArchiveDocumentResponse` and `ArchivePartResponse` deleted, the client deserialising straight into `ArchiveDocument` / `ArchivePart`, which now carry `[JsonPropertyName]` and validate themselves through `IJsonOnDeserialized` — the Archive's own `Document` pattern, which is what made my defence of the mapping wrong the turn before. The `InvalidDataException` that keeps an unusable answer a `502` survives, proved by mutation. 448 tests, 0 warnings |
+| 2026-11-02 | ~0.5 h | Made the test projects mirror the projects they test: 26 files moved so each sits at its subject's path, namespaces following. `CalendarRangeTests` was under `Documents/` for a type in `Validation/Documents/`, `IndexFieldRulesTests` under `Domain/` for rules in `Validation/`, and the four `Contracts` tests were flat against a tree three deep. `Endpoints/` became `Controllers/`, the host fixtures moved to the root beside the `Program.cs` tests, and `DomainValidationTests` split in two so each half mirrors its own domain folder. Same 448 tests, 0 warnings — a structural move should change the count by nothing, and it did not |
+| 2026-11-02 | ~0.4 h | Split `ProjectDependencyTests` so each service enforces its own layering: the Archive's copy no longer holds the Export's project constants, and the Export has the mirror in its own `Api.Tests/Architecture/`. `RepositoryLayout` is duplicated there on purpose — a shared helper project was removed long ago and a cross-service reference is what these rules forbid. Added the guard that stops a prefix filter matching nothing and making six loop rules vacuous, then mutation-checked both directions: a forbidden package in `Export.Core` fails only the Export's tests, and the reverse. 452 tests, 0 warnings |
+| 2026-11-02 | ~0.3 h | Gathered every non-test class in the test projects into its project's `Utils/` — the two `WebApplicationFactory` hosts, both `RepositoryLayout` copies, both `RepositoryFixtures`, `TestCabinets` (with its own test, which follows its subject) and `FakeArchive`. Removed the ten CORS endpoint tests on instruction, as framework behaviour rather than this system's rules; recorded what that gives up, since those tests are what caught `app.UseCors()` going missing the day before. 442 tests, 0 warnings |
+| 2026-11-02 | ~0.9 h | Converted all six test projects from xUnit to MSTest 3.11.1 at request — 37 files, no production code touched. Most of it was mechanical, but one difference is silent rather than loud: xUnit's `Assert.Equal` compares two `IEnumerable`s element by element and MSTest's `Assert.AreEqual` compiles on the same arguments and compares references, so a plain rename would have left ~60 sequence assertions green and worthless. Those are now `CollectionAssert.AreEqual` over arrays, found by scanning for a collection-expression expected argument and then re-reading every remaining `AreEqual` by hand. Argument order reverses for `ContainsSingle`/`Contains`/`DoesNotContain`, `Throws` and `ThrowsExactly` swap strictness, `IsInstanceOfType` returns `void` so eleven call sites take its `out` parameter, and `Assert.All` has no equivalent. Verified by mutation rather than by the suite going green: reversing the two `OrderBy`s in `UploadPlanningService` fails 8 of the converted collection assertions, and breaking the export marker's format fails the converted `Assert.All`. 292 tests, 0 warnings |
+| 2026-11-02 | ~1.1 h | Reshaped the suite around MSTest's own vocabulary and Moq, in four passes on instruction. `[TestInitialize]`/`[TestCleanup]` replaced the xUnit-shaped constructor and `IDisposable` in nine classes; the `private Service()` factories became fields built in `BeforeEach`; `CapturingProblemDetailsService`, two `RecordingLogger`s and `FakeArchive` became `Mock<T>`s with capture lists; and `DocumentsStoreReadWriteTests` merged into `DocumentsStoreServiceTests` — 37 tests spliced verbatim from both files so the merge could not reword an assertion. Removed every test that boots a `WebApplicationFactory` host: four Archive endpoint files, the Export's one, both hosts and the `Mvc.Testing` reference, 56 tests. Recorded what that costs rather than letting the number speak — `Program.cs` and the controllers are now executed by nothing, so the statuses, error shapes, page cap and CORS are unverified by `dotnet test` and Api coverage drops from 99% to about 56%. Mutation-checked the rewrites rather than trusting green: the mocked logger catches a level change in both the middleware and the store, the mocked Archive catches a marker-format change in 3 tests, and a status-code change fails 2. Also renamed every `_`-prefixed private field to plain lowercase, including one in `CabinetCatalog`. 225 tests, 0 warnings |

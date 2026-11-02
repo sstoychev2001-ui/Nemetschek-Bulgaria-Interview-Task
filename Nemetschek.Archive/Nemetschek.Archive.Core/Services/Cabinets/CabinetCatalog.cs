@@ -8,12 +8,12 @@ namespace Nemetschek.Archive.Core.Services.Cabinets;
 /// </summary>
 public sealed class CabinetCatalog(IReadOnlyList<Cabinet> cabinets) : ICabinetCatalog
 {
-    private readonly Dictionary<string, Cabinet> _cabinetsByName =
+    private readonly Dictionary<string, Cabinet> cabinetsByName =
         cabinets.ToDictionary(cabinet => cabinet.Name, StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public IReadOnlyList<Cabinet> All { get; } = cabinets;
 
     /// <inheritdoc />
-    public Cabinet? Find(string cabinetName) => _cabinetsByName.GetValueOrDefault(cabinetName);
+    public Cabinet? Find(string cabinetName) => cabinetsByName.GetValueOrDefault(cabinetName);
 }
