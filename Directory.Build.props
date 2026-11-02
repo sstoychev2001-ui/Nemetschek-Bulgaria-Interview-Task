@@ -1,19 +1,14 @@
 <Project>
 
-  <!-- Shared settings for every project in the repository. Individual csproj files should not
-       restate these; add a property here if it should hold everywhere. -->
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!-- A warning that reaches a reviewer is a warning nobody fixes. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
-    <!-- Deliberately NOT setting InvariantGlobalization: the export rules interpret the user's
-         calendar dates in their own time zone, which needs real time-zone and culture data. -->
   </PropertyGroup>
 
 </Project>

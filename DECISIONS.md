@@ -656,8 +656,12 @@ What an export does not promise:
 - **`cabinets.json` is mounted read-only, not copied into the image, because** the brief requires the
   same image to run with different settings, and nothing about a particular deployment should be baked
   in. It also means the Archive cannot write its own definitions even by mistake.
-- **The runtime image is Debian-based, not Alpine, because** the export rules interpret the user's
-  calendar dates in their own time zone, which needs the ICU and tzdata the Alpine images omit.
+- **The runtime image is Debian-based, not Alpine.** The original reason — the export rules
+  interpreting the user's calendar dates in their own zone, which needs the ICU and tzdata Alpine
+  omits — **lapsed when the time zone parameter was removed** on 2026-10-30. Dates are UTC calendar
+  days now and every format and comparison is explicitly `InvariantCulture` or ordinal, so Alpine
+  would work. Left on Debian because nothing depends on the image being small; revisiting it is
+  open, not decided.
   `curl` was installed alongside it for the compose healthcheck; with that gone, so is the
   `apt-get` layer, and both runtime images are now the base image plus the published output.
 - **The container runs as `$APP_UID`, not root, because** everything a user uploads is untrusted and the
@@ -1259,8 +1263,11 @@ container produced was the fact that it had started.
   genuinely different return types, and the invariant that makes the match safe — no two fields in
   a cabinet differing only by case — is enforced at load time by `Cabinet.Validate`, not by the
   lookup.
-- **`InvariantGlobalization` is deliberately NOT set, because** the export rules interpret the user's
-  calendar dates in their time zone, which needs real time-zone and culture data.
+- **`InvariantGlobalization` is NOT set — but the reason recorded here has lapsed.** It was the
+  export rules interpreting the user's calendar dates in their own zone; the time zone parameter was
+  removed on 2026-10-30, and nothing in either service now reads `TimeZoneInfo` or a non-invariant
+  culture. The same stale reason is still in the comment in `Directory.Build.props`. Setting it is
+  an open question, not a decision that stands.
 
 ## Toolchain
 
@@ -1428,7 +1435,7 @@ extension; per-document commit with a report.
 the enforced dependency rules, the `cabinets.json` loader with its validation and fail-fast startup,
 a runnable Api with OpenAPI and SwaggerUI, and **the upload endpoint end to end** — the
 folder-to-document mapping, ordinal part ordering, untrusted-path handling, per-document commit and
-the one-row-per-entry report. 411 passing tests across six test projects.
+the one-row-per-entry report. 225 passing tests across six test projects.
 
 Also built: **durable storage** — documents are directories of files on a mounted volume, committed
 by one atomic rename, with `tmp/` swept at startup — `GET /cabinets/{name}/documents`, a paged read
@@ -1441,8 +1448,13 @@ refusal, with a storage failure at `Error`).
 | Gap | Brief | Note |
 |---|---|---|
 | **The web client** | Priority 4 | Not started. Both services have browsable OpenAPI, which the brief accepts as the fallback demo |
+| **The HTTP surface has no tests** | Acceptance criteria | Since the endpoint tests were removed on 2026-11-02 (see "The endpoint tests were removed"), `Program.cs` and all four controllers are executed by no test. The upload and export *rules* are still covered, because they live in `Core` — what is not covered is that a route hands them the right input and returns the right status. "Failures reach callers in one documented shape for every endpoint" is now asserted only for `ArchiveExceptionMiddleware` in isolation, and the page cap only as arithmetic in `DocumentPageRequestTests`, not as the controller actually applying `PagingLimits` |
+| **Time zones** | Things your system must cope with | Removed on instruction — see the coping table and "Removed: the time zone parameter" for the measurement and how to reinstate it |
+| **Two error shapes, not one** | Acceptance criteria | A rule refusal is `ProblemDetails`; a missing form field is ASP.NET's `ValidationProblemDetails`. Both documented in `README.md`; reconciling them is open |
 
-Everything else the brief asks of the two services is built. The export rules that were listed as
+Everything else the brief asks of the two services is built: the cabinet schema on the wire, the
+upload rules, the paged date-range read, the index-value write-back, durable storage, the export
+rules with the zip layout and the marker, both containers, and the logs. The export rules that were listed as
 owed are done and tested, the three Archive routes they needed exist, `GET /cabinets` now answers
 the schema a client needs, and `compose up` starts both services, the Export started after the
 Archive.
@@ -1633,3 +1645,4 @@ Rough, as the brief asks for, and grouped per session rather than per prompt. ~3
 | 2026-11-02 | ~0.3 h | Gathered every non-test class in the test projects into its project's `Utils/` — the two `WebApplicationFactory` hosts, both `RepositoryLayout` copies, both `RepositoryFixtures`, `TestCabinets` (with its own test, which follows its subject) and `FakeArchive`. Removed the ten CORS endpoint tests on instruction, as framework behaviour rather than this system's rules; recorded what that gives up, since those tests are what caught `app.UseCors()` going missing the day before. 442 tests, 0 warnings |
 | 2026-11-02 | ~0.9 h | Converted all six test projects from xUnit to MSTest 3.11.1 at request — 37 files, no production code touched. Most of it was mechanical, but one difference is silent rather than loud: xUnit's `Assert.Equal` compares two `IEnumerable`s element by element and MSTest's `Assert.AreEqual` compiles on the same arguments and compares references, so a plain rename would have left ~60 sequence assertions green and worthless. Those are now `CollectionAssert.AreEqual` over arrays, found by scanning for a collection-expression expected argument and then re-reading every remaining `AreEqual` by hand. Argument order reverses for `ContainsSingle`/`Contains`/`DoesNotContain`, `Throws` and `ThrowsExactly` swap strictness, `IsInstanceOfType` returns `void` so eleven call sites take its `out` parameter, and `Assert.All` has no equivalent. Verified by mutation rather than by the suite going green: reversing the two `OrderBy`s in `UploadPlanningService` fails 8 of the converted collection assertions, and breaking the export marker's format fails the converted `Assert.All`. 292 tests, 0 warnings |
 | 2026-11-02 | ~1.1 h | Reshaped the suite around MSTest's own vocabulary and Moq, in four passes on instruction. `[TestInitialize]`/`[TestCleanup]` replaced the xUnit-shaped constructor and `IDisposable` in nine classes; the `private Service()` factories became fields built in `BeforeEach`; `CapturingProblemDetailsService`, two `RecordingLogger`s and `FakeArchive` became `Mock<T>`s with capture lists; and `DocumentsStoreReadWriteTests` merged into `DocumentsStoreServiceTests` — 37 tests spliced verbatim from both files so the merge could not reword an assertion. Removed every test that boots a `WebApplicationFactory` host: four Archive endpoint files, the Export's one, both hosts and the `Mvc.Testing` reference, 56 tests. Recorded what that costs rather than letting the number speak — `Program.cs` and the controllers are now executed by nothing, so the statuses, error shapes, page cap and CORS are unverified by `dotnet test` and Api coverage drops from 99% to about 56%. Mutation-checked the rewrites rather than trusting green: the mocked logger catches a level change in both the middleware and the store, the mocked Archive catches a marker-format change in 3 tests, and a status-code change fails 2. Also renamed every `_`-prefixed private field to plain lowercase, including one in `CabinetCatalog`. 225 tests, 0 warnings |
+| 2026-11-02 | ~0.4 h | Audited the two services against `TASK.md` line by line, excluding the web client, rather than against what the documents claimed. Everything the brief asks of the Archive and the Export is built and reachable: the cabinet schema, the upload rules, the paged date-range read, the index-value write-back, durable storage, the zip layout, the marker, both containers, the logs and the OpenAPI. Four gaps stand, now all in one table: the client, the HTTP surface having no tests since the endpoint tests were removed, time zones, and the two error shapes. Found three places that still justified a decision by the time-zone behaviour deleted on 2026-10-30 — the Debian base image, `InvariantGlobalization`, and the comment in `Directory.Build.props` — and corrected all three to say the reason lapsed rather than leaving a reviewer a rationale the code no longer matches. Also corrected the summary's stale "411 passing tests" to 225. No code change |
