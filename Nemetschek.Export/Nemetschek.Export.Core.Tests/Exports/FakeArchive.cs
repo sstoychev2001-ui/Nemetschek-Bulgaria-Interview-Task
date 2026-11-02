@@ -1,6 +1,6 @@
 using System.Text;
 using Nemetschek.Export.Core.Domain.Exports;
-using Nemetschek.Export.Core.Services.Interfaces;
+using Nemetschek.Export.Core.Clients.Interfaces;
 
 namespace Nemetschek.Export.Core.Tests.Exports;
 

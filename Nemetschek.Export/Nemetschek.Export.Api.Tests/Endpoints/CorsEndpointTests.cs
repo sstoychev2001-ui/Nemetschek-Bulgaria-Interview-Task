@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Nemetschek.Export.Core.Domain.Exports;
-using Nemetschek.Export.Core.Services.Interfaces;
+using Nemetschek.Export.Core.Clients.Interfaces;
 
 namespace Nemetschek.Export.Api.Tests.Endpoints;
 

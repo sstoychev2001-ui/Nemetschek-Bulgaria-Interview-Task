@@ -140,7 +140,7 @@ Tests need no containers and run straight from the repository. Requires the .NET
 
 ```bash
 dotnet build                        # warnings are errors
-dotnet test                         # offline, no containers — 450 tests
+dotnet test                         # offline, no containers — 448 tests
 dotnet test --collect:"XPlat Code Coverage"
 ```
 
@@ -410,20 +410,27 @@ in the volume today are from an upload after that reinstall, not the original tw
 
 ## Settings that have to be supplied
 
-Every setting each service reads is listed in its own `appsettings.json`, with a placeholder showing
-the type: a blank string for the ones that must be supplied, and the real default for the tunables.
-**A blank required setting is treated as missing**, so startup fails naming it rather than guessing.
-`appsettings.Development.json` fills the blanks in for running from source — see above.
+**No setting has a code default.** Every one is read as
+`builder.Configuration["Section:Key"] ?? throw new InvalidOperationException(…)`, so a key that is
+absent from configuration stops startup naming itself. Each service's `appsettings.json` is
+therefore the full list — blank for the two paths and the Archive's address, real values for the
+limits — and `appsettings.Development.json` fills the blanks for running from source. `docker-compose.yml`
+supplies every key explicitly, so the containers do not depend on either file.
+
+One caveat, since blank and absent now differ: a blank `Archive:CabinetsFile` is not null, so it
+passes the `??` and is refused one layer down by `AddCabinetCatalog` with
+`ArgumentException: The value cannot be an empty string … (Parameter 'cabinetsFilePath')` — startup
+still stops, but the message names the parameter rather than the setting.
 
 | Setting | Service | Purpose |
 |---|---|---|
 | `Archive:CabinetsFile` | Archive | **Required.** Path to `cabinets.json`. Absolute, or relative to the service's content root. The service refuses to start without it, and refuses to start if the file is missing or unusable. |
 | `Archive:StoragePath` | Archive | **Required.** Directory the Archive keeps documents in. **It must be on a mounted volume, or data will not survive a restart.** The service refuses to start without it, or if the directory cannot be created. |
-| `Archive:MaxUploadBytes` | Archive | Largest upload body accepted, in bytes. Default 268435456 (256 MiB). |
-| `Archive:MaxUploadEntries` | Archive | Most parts accepted in one multipart body. Default 10000. |
-| `Archive:MaxPageSize` | Archive | Most documents one page may hold. Default 50; the review demo runs with 5. |
-| `Archive:AllowedOrigins` | Archive | Origins a browser client may call from, comma-separated — `http://localhost:5173,https://client.example`. **Unset means any origin**, which is what the demo wants: nothing here is authenticated and no cookie is read, so there is no credential for a hostile page to borrow. Set it to pin the client's host. |
-| `Export:AllowedOrigins` | Export | The same, for the Export service. It also exposes `Content-Disposition`, so a cross-origin client can read the zip's file name off the response instead of inventing one. |
+| `Archive:MaxUploadBytes` | Archive | **Required.** Largest upload body accepted, in bytes. `appsettings.json` carries 268435456 (256 MiB). |
+| `Archive:MaxUploadEntries` | Archive | **Required.** Most parts accepted in one multipart body. `appsettings.json` carries 10000. |
+| `Archive:MaxPageSize` | Archive | **Required.** Most documents one page may hold. `appsettings.json` carries 50; the review demo runs with 5. |
+| `Archive:AllowedOrigins` | Archive | **Required**, and may be empty. Origins a browser client may call from, comma-separated — `http://localhost:5173,https://client.example`. **Empty means any origin**, which is what the demo wants: nothing here is authenticated and no cookie is read, so there is no credential for a hostile page to borrow. Set it to pin the client's host. |
+| `Export:AllowedOrigins` | Export | **Required**, and may be empty. The same as the Archive's, It also exposes `Content-Disposition`, so a cross-origin client can read the zip's file name off the response instead of inventing one. |
 | `Export:ArchiveBaseAddress` | Export | **Required.** The Archive's HTTP base address, such as `http://archive-api:8080`. The service refuses to start without it, and refuses an address that is not absolute. There is no Production default on purpose: the Export reaches the Archive over HTTP and nothing else, so a wrong or missing address has to fail at startup rather than at the first export. |
 
 Every setting can be supplied as an environment variable using ASP.NET Core's double-underscore form,

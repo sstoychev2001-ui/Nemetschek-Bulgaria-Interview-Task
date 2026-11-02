@@ -7,8 +7,4 @@ namespace Nemetschek.Export.Core.Domain.Exports;
 /// <param name="MarkerFieldName">The writable text field the export marker is written into.</param>
 /// <param name="From">The first calendar date to include, as the user means it.</param>
 /// <param name="To">The last calendar date to include, in full, as the user means it.</param>
-public sealed record ExportRequest(
-    string CabinetName,
-    string MarkerFieldName,
-    DateOnly From,
-    DateOnly To);
+public sealed record ExportRequest(string CabinetName, string MarkerFieldName, DateOnly From, DateOnly To);

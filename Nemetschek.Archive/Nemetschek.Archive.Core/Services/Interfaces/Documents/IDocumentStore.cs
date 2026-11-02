@@ -38,11 +38,7 @@ public interface IDocumentStore
 
     /// <summary>Opens a part's content for reading. The caller disposes the stream.</summary>
     /// <exception cref="DocumentNotFoundException">There is no such document, or no such part.</exception>
-    Task<Stream> OpenPartAsync(
-        string cabinetName,
-        Guid documentId,
-        Guid partId,
-        CancellationToken cancellationToken);
+    Task<Stream> OpenPartAsync(string cabinetName, Guid documentId, Guid partId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Replaces the named index values of a stored document. Values that are not named are left

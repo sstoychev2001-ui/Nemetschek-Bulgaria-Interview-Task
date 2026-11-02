@@ -65,23 +65,21 @@ public sealed class ServiceRegistrationTests : IDisposable
     }
 
     [Fact]
-    public void The_port_and_the_storage_root_are_registered_but_not_the_store_itself()
+    public void The_port_is_registered_but_not_the_store_itself()
     {
         var provider = Provider(services => services.AddDocumentsStore(root, root));
 
         Assert.NotNull(provider.GetRequiredService<IDocumentStore>());
-        Assert.NotNull(provider.GetRequiredService<DocumentStorageRoot>());
         Assert.Null(provider.GetService<DocumentsStoreService>());
     }
 
     [Fact]
-    public void The_store_is_registered_on_the_resolved_absolute_path()
+    public void A_relative_storage_path_is_resolved_against_the_base_path()
     {
-        var provider = Provider(services => services.AddDocumentsStore("documents", root));
+        Provider(services => services.AddDocumentsStore("documents", root));
 
-        Assert.Equal(
-            Path.Combine(root, "documents"),
-            provider.GetRequiredService<DocumentStorageRoot>().Path);
+        Assert.True(Directory.Exists(Path.Combine(root, "documents", "cabinets")));
+        Assert.True(Directory.Exists(Path.Combine(root, "documents", "tmp")));
     }
 
     [Fact]
@@ -96,7 +94,6 @@ public sealed class ServiceRegistrationTests : IDisposable
     [Fact]
     public void Registering_the_store_sweeps_a_staging_directory_left_behind()
     {
-        new DocumentStorageRoot(root).Prepare();
         Directory.CreateDirectory(Path.Combine(root, "tmp", "abandoned"));
 
         new ServiceCollection().AddLogging().AddDocumentsStore(root, root);

@@ -28,13 +28,6 @@ public sealed class Cabinet : IValidatableObject, IJsonOnDeserialized
     [JsonPropertyName("fields")]
     public IReadOnlyList<IndexField> Fields { get; init; } = [];
 
-    /// <summary>
-    /// The fields a client may choose as the upload field or the export marker field.
-    /// </summary>
-    [JsonIgnore]
-    public IEnumerable<IndexField> WritableTextFields =>
-        Fields.Where(field => field.Writable && field.Type == FieldType.Text);
-
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         var results = new List<ValidationResult>();

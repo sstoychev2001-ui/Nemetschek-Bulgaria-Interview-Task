@@ -4,7 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Nemetschek.Export.Core.Domain.Exports;
-using Nemetschek.Export.Core.Services.Interfaces;
+using Nemetschek.Export.Core.Clients.Interfaces;
 
 namespace Nemetschek.Export.Api.Tests.Endpoints;
 

@@ -1,4 +1,5 @@
 using Nemetschek.Archive.Core.Tests.Cabinets;
+using Nemetschek.Archive.Core.Domain.Cabinets;
 using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Core.Validation.IndexFields;
@@ -213,10 +214,15 @@ public sealed class IndexFieldRulesTests
     {
         Assert.Equal(
             ["InvoiceNumber", "Supplier", "Batch", "Status"],
-            TestCabinets.Invoices().WritableTextFields.Select(f => f.Name));
+            Choosable(TestCabinets.Invoices()));
 
         Assert.Equal(
             ["ContractNumber", "Party", "Notes"],
-            TestCabinets.Contracts().WritableTextFields.Select(f => f.Name));
+            Choosable(TestCabinets.Contracts()));
     }
+
+    private static IEnumerable<string> Choosable(Cabinet cabinet) =>
+        cabinet.Fields
+            .Where(field => IndexFieldRules.ValidateChosenTextField(cabinet, field.Name) is null)
+            .Select(field => field.Name);
 }

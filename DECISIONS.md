@@ -314,9 +314,60 @@ decisions behind it.
   would re-stamp it; marking would happen *before* the entry is in the archive; and a read route
   would have to take the caller's chosen marker field, coupling the Archive's public API to one
   caller. Batching gets the saving without any of that, which is what was built.
-- Rejected: **sharing a DTO or a project with the Archive.** The client's four DTOs duplicate the
-  Archive's wire shape on purpose; `No_Export_project_references_an_Archive_project` and its mirror
-  enforce it. That duplication is the boundary.
+- Rejected: **sharing a DTO or a project with the Archive.** The client's own request and response
+  types duplicate the Archive's wire shape on purpose;
+  `No_Export_project_references_an_Archive_project` and its mirror enforce it. That duplication is
+  the boundary.
+- **`ArchiveDocument` and `ArchivePart` are one type each, serving as both the Archive's wire shape
+  and the export rules' model** (2026-11-02, after two rounds of argument). I first defended the two
+  types and the `ToDocument()` mapping between them, on the grounds that the response type's
+  `string? Title` must not reach the zip-naming rules. That reason was real but the conclusion was
+  wrong, for a reason already written down one section up: **the Archive's own `Document` is exactly
+  this** — one record carrying `[JsonPropertyName]` for `document.json` *and* serving as the domain
+  type, validating itself through `IJsonOnDeserialized`. The Export having two types for the same
+  job was the inconsistency, not the fix for one. The same precedent settled `DocumentDraft` /
+  `PartDraft`: this project trades a compiler-enforced boundary for fewer types and writes the
+  looser invariant down.
+
+  So `ArchiveDocumentResponse` and `ArchivePartResponse` are gone and the client deserialises
+  straight into `ArchiveDocument` / `ArchivePart`. **What could not go is the validation**, because
+  it is what makes an unusable answer a `502` rather than a `500`: both records implement
+  `IJsonOnDeserialized` and throw `InvalidDataException` when the Archive sends no id, no
+  title/name, or no parts list — the same check in the same place in the pipeline, now attached to
+  deserialisation instead of a copy. Verified by deleting the check and watching
+  `An_answer_that_is_not_a_usable_document_is_refused` fail, which also confirms
+  System.Text.Json calls `OnDeserialized` on a positional record built through its constructor.
+
+  `ArchiveDocumentPageResponse` stays in `Clients/Responses/`: a page envelope of `total` plus
+  `documents` is transport and has no meaning to the rules, so it is the one type here that earns
+  its place on the wire side alone.
+- **The client moved from `Export.Infrastructure` into `Export.Core/Clients/` on 2026-11-02, at
+  request**, with `Interfaces/`, `Requests/` and `Responses/` beside it. The case for it: talking to
+  the Archive *is* what this service does — there is no export without it — so by the same reasoning
+  that keeps `DocumentsStoreService` in the Archive's `Core` rather than its `Infrastructure`, the
+  client belongs with the rules it serves rather than at the edge. It also puts the interface and its
+  one implementation in the same folder, where previously the seam was split across two projects for
+  a boundary that only ever had one crossing.
+
+  **Checked before moving, because it would have been a bad surprise:** `Core`'s package allowlist
+  is one entry long and enforced by a test, so the client had to need nothing new. It does not —
+  `HttpClient`, `System.Net.Http.Json` and `System.Text.Json` are all in the shared framework, so
+  `Core` still declares only `Microsoft.Extensions.Logging.Abstractions` and
+  `Export_Core_declares_only_allowed_package_references` still passes.
+
+  What stayed in `Infrastructure` is `AddArchiveClient`: the `HttpClient` registration, the base
+  address with its trailing slash, and the infinite timeout a streamed export needs. That is the part
+  that is genuinely about the deployment, and it keeps `Microsoft.Extensions.Http` out of `Core`.
+  The DTOs were renamed `*Dto` → `*Response` to match the folder, and the anonymous object that was
+  the batch marker's body became `IndexValuesBatchRequest` + `IndexValueRequest` so `Requests/` holds
+  a named type and the wire shape is explicit rather than inferred from property casing. The Api test
+  that asserts the exact PATCH body is what proves the serialisation did not change.
+
+  `ArchiveHttpClientTests` moved to `Export.Core.Tests/Clients/` with the class. That left
+  `Export.Infrastructure.Tests` with nothing in it — and it cannot simply go, because
+  `Both_services_have_the_same_shape` requires six projects per service — so it now holds
+  `ServiceRegistrationTests` for `AddArchiveClient`, which had no tests at all before: the port
+  resolving to the client, a blank or relative address stopping startup, and the trailing slash.
 
 ## What an export costs, and what it does not promise
 
@@ -768,8 +819,12 @@ container produced was the fact that it had started.
 - **`GET /cabinets` answers `choosable` per field as well as `writable`, because** the rule for the
   upload field and the export marker field is "writable **and** text", and a client that filters a
   dropdown on `writable && type == "text"` has restated a server rule — which the brief forbids. The
-  Archive already holds the rule as `Cabinet.WritableTextFields`; the flag is that property on the
-  wire. `writable` stays alongside it because the brief asks for it by name and it answers a
+  Archive already holds the rule as `IndexFieldRules.ValidateChosenTextField`, the same call that
+  refuses an upload or an export naming a field it may not use, so the flag *is* that rule rather
+  than a second statement of it — change the rule and the flag follows. `Cabinet.WritableTextFields`
+  expressed the same predicate on the domain type and was removed on 2026-11-02 once the mapping
+  asked the rule directly: one caller, and a parallel definition of a rule that already had a home.
+  `writable` stays alongside `choosable` because the brief asks for it by name and it answers a
   different question: whether a write to the field is allowed at all. On the fixture's `Invoices`
   that is `InvoiceNumber`, `Supplier`, `Batch`, `Status` choosable, with `Amount` and `InvoiceDate`
   writable but not choosable and `ApprovedBy` neither.
@@ -825,16 +880,51 @@ container produced was the fact that it had started.
   writable layer and lose them on the next restart, quietly. Development-only defaults keep that
   protection whole: verified both ways, the service starting from source with no variables set, and
   `ASPNETCORE_ENVIRONMENT=Production` failing with `Setting 'Archive:CabinetsFile' is required`.
-- **A blank required setting is treated as missing, because** the placeholder made blank the normal
-  shape of "not supplied", and `?? throw` only catches an absent key. Without the change the error
-  degraded from `InvalidOperationException: Setting 'Archive:StoragePath' is required` to an
-  `ArgumentException` about an empty string thrown from inside a DI extension, which no longer names
-  the setting a reader has to go and set. `RequiredSettingTests` on both services pins the message
-  for `""` and for whitespace.
+- **Every setting is read the same way, and none has a code default** (2026-11-02, on
+  instruction): `builder.Configuration["Section:Key"] ?? throw new InvalidOperationException(
+  "Setting 'Section:Key' is required")`, in both services, for all eight settings. The argument for
+  uniformity is that a reader can scan the top of `Program.cs` and see the complete set with no
+  special cases — previously three settings used `GetValue` with an inline default, so the real
+  limits were visible only in code, and `appsettings.json` could disagree with them silently. Now
+  the file is the single statement of what the limits are, and a missing key is a startup failure
+  rather than a quiet fallback. The numeric ones are read as strings and parsed with
+  `CultureInfo.InvariantCulture`, so a container's locale cannot change what `268435456` means.
+
+  **What this costs, and it is a real trade-off that was argued before the change:** `??` only
+  fires on an *absent* key, and `appsettings.json` ships every key with a placeholder — so for the
+  blank ones the throw is unreachable. A blank `Archive:CabinetsFile` now passes the `??` and is
+  refused one layer down by `AddCabinetCatalog`'s `ArgumentException.ThrowIfNullOrWhiteSpace`:
+  verified, `The value cannot be an empty string or composed entirely of whitespace. (Parameter
+  'cabinetsFilePath')`. Startup still stops — the fail-fast requirement holds — but the message
+  names the parameter instead of the setting a reader has to go and set. The earlier
+  blank-is-treated-as-missing form preserved that message; it was replaced for the uniform shape,
+  knowingly. Restoring it is one predicate, if the message matters more than the uniformity.
 - **The Export's Development default is `http://localhost:5287`, not the container's `:8080`,
   because** it is the Archive's own launch-profile address, so the pair works from source with
   nothing supplied. Compose overrides it with the service name, which is the only place `:8080` is
   right.
+
+- **`DocumentStorageRoot` was removed on 2026-11-02 and its `Prepare` became a private
+  `PrepareStorage` in `DocumentsServiceCollectionExtensions`, because** preparing a directory is
+  something the *deployment* does once at startup, not something the Archive does — and `AddDocumentsStore`
+  was the only caller. What is left of the type was a `string`, so `DocumentsStoreService` now takes
+  the resolved storage path directly: one fewer type registered in DI, one fewer indirection between
+  the store and the five places it composes a path.
+
+  **What this gives up:** the store no longer carries anything that could create its own directories,
+  so the two it needs — `cabinets/` and `tmp/` — are a precondition rather than something it can
+  establish. In the service that is true either way, since registration runs before the first
+  request; in tests it means a fixture has to create `tmp/` itself, which the two store test classes
+  now do with `Directory.CreateDirectory(DocumentStorageUtils.Staging(root))`. Worth knowing because
+  the failure mode if someone forgets is a `DirectoryNotFoundException` from `SetIndexValuesAsync`,
+  which stages its `document.json` with `File.Create` and so will not create a parent.
+
+  `DocumentStorageRootTests` went with the type; the three behaviours it pinned were already covered
+  on the other side of the seam by `ServiceRegistrationTests` — the directories being created, a
+  left-behind staging directory being swept, and an unusable path stopping startup. The registration
+  test that read `DocumentStorageRoot.Path` to prove a relative path resolves now asserts the
+  prepared directories exist at the resolved location instead, which proves the same thing by
+  observation rather than by asking the object.
 
 ## Storage
 
@@ -876,9 +966,11 @@ container produced was the fact that it had started.
   members as the Export's three routes landed on it. What came out, and why each earns a file:
   `DocumentStorageUtils` (in `Core/Utils/Documents/`) holds the folder names, the day and instant
   formats, and the two parsers that read a path back — pure, so the layout is now testable without
-  a filesystem, which 15 new tests do; `DocumentStorageRoot` holds `Prepare` and `CanWrite`, which
-  answers "is the deployment usable" rather than "where does this document go", and the readiness
-  probe now depends on it alone instead of holding the whole store; `DocumentMetadataFile` holds
+  a filesystem, which 15 new tests do; `DocumentStorageRoot` held `Prepare` and `CanWrite`, which
+  answered "is the deployment usable" rather than "where does this document go" — it is gone now,
+  `CanWrite` with the health checks on 2026-10-31 and `Prepare` into the registration on
+  2026-11-02, since preparing a directory is something a deployment does once rather than something
+  the Archive does; `DocumentMetadataFile` holds
   reading and writing `document.json`, and owns the serialiser options because nothing else uses
   them. The store keeps the port's five operations and the commit-whole-or-not-at-all property that
   each of them turns on. 379 lines became 293 + 100 + 53 + 48.
@@ -1344,6 +1436,15 @@ Where the AI was wrong, and how it was caught.
   guard for a total the Archive cannot deliver. Against the Archive the wasted request is cheap;
   against the review demo it is one line in the log per export that no one can account for.
 
+- **Paging the directory walk before counting it made `Total` the page size.** A cleanup moved
+  `ListAsync`'s `.Skip(skip).Take(take)` from the read loop up into the enumeration, so the list it
+  counted held one page rather than the whole window. `DocumentPage.Total` then answered "5" for a
+  cabinet of 24. Seven tests said so immediately, which is the system working — but the consequence
+  is worth recording because it lands squarely on the brief's demo: with `Archive:MaxPageSize` set
+  to 5, the Export's paging loop breaks on `read >= page.Total` after the first page, so an export
+  would have quietly contained the first five documents and nothing else. The count and the page are
+  two different questions of the same walk: materialise it once, count all of it, read a slice.
+
 - **A hand cleanup of the store silently disabled the instant filter, and a green suite said nothing.**
   Rewriting `DocumentDirectories` to name its locals changed `StoredAtOf(directory)` to
   `StoredAtOf(day)`. A day directory is named `2026-03-01`, which the parser cannot read as an instant,
@@ -1362,7 +1463,7 @@ Where the AI was wrong, and how it was caught.
 
 ## Time log
 
-Rough, as the brief asks for, and grouped per session rather than per prompt. ~31.0 h in total.
+Rough, as the brief asks for, and grouped per session rather than per prompt. ~33.4 h in total.
 
 | Date | Time | What |
 |---|---|---|
@@ -1392,3 +1493,11 @@ Rough, as the brief asks for, and grouped per session rather than per prompt. ~3
 | 2026-11-01 | ~0.6 h | Built `GET /cabinets`, the last Archive gap: every cabinet with its fields, each answering `type`, `maxLength`, `writable` and `choosable`. `choosable` exists so a client's upload-field and marker-field pickers do not restate "writable and text" — `Cabinet.WritableTextFields` put on the wire. Then split the five-action `CabinetsController` into one controller per entity, routes unchanged; the existing endpoint tests passing against the same URLs is the proof. 23 new tests (mapping and endpoint), and a mutation that makes every field choosable fails 7 of them. 434 tests, 0 warnings |
 | 2026-11-01 | ~0.5 h | CORS on both services, closing the last non-client gap: one comma-separated `AllowedOrigins` setting each, empty meaning any origin, `UseCors` placed before the error shapes so a refusal stays readable cross-origin, and `Content-Disposition` exposed on the Export so the download's name is not restated in the client. 10 endpoint tests; removing `app.UseCors()` fails 4 of 5 per service. Caught that exact removal for real: a cleanup pass stripped the call along with its comment, which would have left `AddCors` registered and never applied. 444 tests, 0 warnings |
 | 2026-11-01 | ~0.5 h | Made both services runnable from source with nothing supplied: every setting now appears in `appsettings.json` as a typed placeholder, and the live values sit in `appsettings.Development.json`, which keeps the container's fail-fast protection intact. A blank required setting is now treated as missing, or the placeholder would have degraded the error from one naming the setting to an `ArgumentException` about an empty string; `RequiredSettingTests` pins the message on both services. Verified by running the pair and calling `GET /cabinets`, and by confirming Production still refuses to start. Also fixed `RepositoryLayout`, whose csproj scan counted a git worktree's copy of every project and threw in its static initializer. 450 tests, 0 warnings |
+| 2026-11-02 | ~0.3 h | Removed `Cabinet.WritableTextFields`. It had one caller — the `choosable` flag on `GET /cabinets` — and restated a rule `IndexFieldRules.ValidateChosenTextField` already owned, so the mapping now asks that rule directly and the flag cannot drift from what actually refuses an upload or an export. Mutating the flag's source to plain `writable` fails 5 tests. Took the three `WebApplicationFactory` knobs with it, left unused when the `RequiredSettingTests` were deleted, and corrected the settings decision that claimed those tests still pinned the blank-is-missing message. 444 tests, 0 warnings |
+| 2026-11-02 | ~0.1 h | `DocumentNotFoundException` became two constructors instead of one with an optional `Guid? partId` and a ternary over it. Each overload carries one literal message, so the wrong one cannot be chosen and neither call site can pass a null part id. Both overloads are already reached by the store tests — the missing document through the directory lookup, the missing part through the file lookup. 444 tests, 0 warnings |
+| 2026-11-02 | ~0.2 h | Answered whether `SetIndexValuesAsync`'s `merged` dictionary is redundant: it is not, and both of its jobs are pinned. Assigning `values` straight onto the document fails `Setting_one_value_leaves_the_others_alone`, because the caller names only the fields it is changing; dropping just the `OrdinalIgnoreCase` comparer fails `A_value_is_matched_to_its_field_whatever_case_it_is_given_in`, because System.Text.Json rebuilds the dictionary case-sensitively on read. Both proved by mutation. Found seven tests already red on the way: `ListAsync` had been paged before it was counted, making `Total` the page size — restored, since at the demo's page size of 5 it would have cut every export to five documents. 444 tests, 0 warnings |
+| 2026-11-02 | ~0.4 h | Removed `DocumentStorageRoot`: `Prepare` became a private `PrepareStorage` in `DocumentsServiceCollectionExtensions`, its only caller, and `DocumentsStoreService` now takes the resolved path as a `string` — one fewer DI registration and one fewer hop to the five places it composes a path. The type's tests went with it, their three behaviours already covered by `ServiceRegistrationTests` on the registration side; the test that read `.Path` to prove relative resolution now asserts the prepared directories exist at the resolved location. Also dropped the redundant intermediate `part` record in `WritePartsAsync` — a `Guid` local and one `with` where there were two. 439 tests, 0 warnings |
+| 2026-11-02 | ~0.3 h | Rewrote every configuration read in both `Program.cs` files to one shape — `Configuration[key] ?? throw` — and removed the three `GetValue` defaults, so the eight settings are stated once, in `appsettings.json`, rather than half in code. Numeric values are parsed with `InvariantCulture`. Verified both ends: Development still starts with nothing supplied and the page cap binds (a request for 999 came back capped at 50), and Production still refuses to start. Recorded the cost — with placeholders present the `??` is unreachable for blank keys, so a blank path is now refused by the DI extension with a message naming the parameter rather than the setting. 439 tests, 0 warnings |
+| 2026-11-02 | ~0.7 h | Moved `ArchiveHttpClient` from `Export.Infrastructure` into `Export.Core/Clients/`, with `Interfaces/`, `Requests/` and `Responses/` beside it. Checked first that `Core`'s one-entry package allowlist still holds — `HttpClient` and `System.Net.Http.Json` are shared-framework, so no new reference. The response DTOs were renamed to match the folder and the anonymous PATCH body became a named `IndexValuesBatchRequest`, with the Api test that asserts the exact body proving the serialisation is unchanged. `AddArchiveClient` stayed in `Infrastructure` and finally has tests — the project was left empty by the move and cannot be deleted, since an architecture test requires six projects per service. Two of my own new assertions were wrong and the suite said so: `archive-api:8080` *is* an absolute URI (scheme `archive-api`), and a typed client is registered under the service type's name, not the implementation's. 448 tests, 0 warnings |
+| 2026-11-02 | ~0.1 h | Analysis only: whether `ArchiveDocument` and `ArchivePart` should join `Clients/Responses/`. They should not — they are the port's contract, built by three HTTP-free test fakes, and the nullable-to-non-nullable step between response and domain is what the second type is for. Recorded the naming flaw the question exposed instead, and offered the rename to `Document`/`Part`. No code change |
+| 2026-11-02 | ~0.3 h | Collapsed the Export's two-types-and-a-mapping into one type each: `ArchiveDocumentResponse` and `ArchivePartResponse` deleted, the client deserialising straight into `ArchiveDocument` / `ArchivePart`, which now carry `[JsonPropertyName]` and validate themselves through `IJsonOnDeserialized` — the Archive's own `Document` pattern, which is what made my defence of the mapping wrong the turn before. The `InvalidDataException` that keeps an unusable answer a `502` survives, proved by mutation. 448 tests, 0 warnings |

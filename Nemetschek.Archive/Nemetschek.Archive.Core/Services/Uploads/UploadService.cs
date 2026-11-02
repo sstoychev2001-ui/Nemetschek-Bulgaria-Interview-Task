@@ -81,9 +81,9 @@ public sealed class UploadService(
         foreach (var plannedEntry in plannedEntries)
         {
             UploadEntry entry;
-            if (plannedEntry.Draft is { } draft)
+            if (plannedEntry.Draft is not null)
             {
-                entry = await StoreOneAsync(plannedEntry, draft, cancellationToken);
+                entry = await StoreOneAsync(plannedEntry, plannedEntry.Draft, cancellationToken);
             }
             else
             {

@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text;
-using Nemetschek.Export.Infrastructure.Archive;
+using Nemetschek.Export.Core.Clients;
 
-namespace Nemetschek.Export.Infrastructure.Tests.Archive;
+namespace Nemetschek.Export.Core.Tests.Clients;
 
 /// <summary>
 /// The only way the Export service reaches the Archive: over HTTP, against a fake handler.

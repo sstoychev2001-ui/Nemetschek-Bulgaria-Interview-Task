@@ -13,16 +13,18 @@ namespace Nemetschek.Archive.Core.Services.Documents;
 /// it stored or could not store.
 /// </summary>
 public sealed class DocumentsStoreService(
-    DocumentStorageRoot root,
+    string storagePath,
     TimeProvider clock,
     ILogger<DocumentsStoreService> logger) : IDocumentStore
 {
+    private const int DefaultReadBufferSize = 64 * 1024;
+
     /// <inheritdoc />
     public async Task<Document> AddAsync(Document document, CancellationToken cancellationToken)
     {
         var storedAt = clock.GetUtcNow();
 
-        var staging = DocumentStorageUtils.StagingPath(root.Path);
+        var staging = DocumentStorageUtils.StagingPath(storagePath);
         Directory.CreateDirectory(DocumentStorageUtils.PartsDirectory(staging));
 
         try
@@ -39,17 +41,15 @@ public sealed class DocumentsStoreService(
                 DocumentStorageUtils.MetadataFile(staging), document, cancellationToken);
 
             var day = Directory.CreateDirectory(Path.Combine(
-                DocumentStorageUtils.CabinetDirectory(root.Path, document.CabinetName),
-                storedAt.UtcDateTime.ToString(
-                    DocumentStorageUtils.DayFormat, CultureInfo.InvariantCulture)));
+                DocumentStorageUtils.CabinetDirectory(storagePath, document.CabinetName),
+                storedAt.UtcDateTime.ToString(DocumentStorageUtils.DayFormat, CultureInfo.InvariantCulture))
+            );
 
-            Directory.Move(
-                staging,
-                Path.Combine(
-                    day.FullName,
-                    $"{storedAt.UtcDateTime.ToString(
-                        DocumentStorageUtils.InstantFormat, CultureInfo.InvariantCulture)}" +
-                    $"_{document.Id}"));
+            var destinationDirectoryName = Path.Combine(
+                day.FullName,
+                $"{storedAt.UtcDateTime.ToString(DocumentStorageUtils.InstantFormat, CultureInfo.InvariantCulture)}_{document.Id}");
+
+            Directory.Move(staging, destinationDirectoryName);
 
             logger.LogInformation(
                 "Stored {DocumentId} in {CabinetName} with {PartCount} part(s)",
@@ -77,46 +77,42 @@ public sealed class DocumentsStoreService(
         int take,
         CancellationToken cancellationToken)
     {
-        var directories = DocumentDirectories(cabinetName, storedAt).ToList();
+        var allDirectories = DocumentDirectories(cabinetName, storedAt)
+            .ToList();
+
+        var directoryPage = allDirectories
+            .Skip(skip)
+            .Take(take);
 
         var documents = new List<Document>();
-        foreach (var directory in directories.Skip(skip).Take(take))
+        foreach (var directory in directoryPage)
         {
             documents.Add(await DocumentMetadataFile.ReadAsync(directory, cancellationToken));
         }
 
-        return new DocumentPage(documents, directories.Count);
+        return new DocumentPage(documents, allDirectories.Count);
     }
 
     /// <inheritdoc />
-    public async Task<Document> FindAsync(
-        string cabinetName,
-        Guid documentId,
-        CancellationToken cancellationToken) =>
+    public async Task<Document> FindAsync(string cabinetName, Guid documentId, CancellationToken cancellationToken) =>
         await DocumentMetadataFile.ReadAsync(GetDocumentDirectory(cabinetName, documentId), cancellationToken);
 
     /// <inheritdoc />
-    public Task<Stream> OpenPartAsync(
-        string cabinetName,
+    public Task<Stream> OpenPartAsync(string cabinetName,
         Guid documentId,
         Guid partId,
         CancellationToken cancellationToken)
     {
+        var partPath = DocumentStorageUtils.PartsDirectory(GetDocumentDirectory(cabinetName, documentId));
+
         var file = Directory
-            .EnumerateFiles(
-                DocumentStorageUtils.PartsDirectory(
-                    GetDocumentDirectory(cabinetName, documentId)),
-                $"*_{partId}.bin")
+            .EnumerateFiles(partPath, $"*_{partId}.bin")
             .FirstOrDefault()
             ?? throw new DocumentNotFoundException(cabinetName, documentId, partId);
 
-        return Task.FromResult<Stream>(new FileStream(
-            file,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 64 * 1024,
-            useAsync: true));
+        var partStream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, DefaultReadBufferSize, true);
+
+        return Task.FromResult<Stream>(partStream);
     }
 
     /// <inheritdoc />
@@ -141,7 +137,7 @@ public sealed class DocumentsStoreService(
             ModifiedAt = clock.GetUtcNow()
         };
 
-        var staging = DocumentStorageUtils.StagingPath(root.Path, ".json");
+        var staging = DocumentStorageUtils.StagingPath(storagePath, ".json");
 
         try
         {
@@ -171,7 +167,7 @@ public sealed class DocumentsStoreService(
     /// <summary>Every document directory of a cabinet inside a window, oldest first.</summary>
     private IEnumerable<string> DocumentDirectories(string cabinetName, StoredRange storedAt)
     {
-        var cabinet = DocumentStorageUtils.CabinetDirectory(root.Path, cabinetName);
+        var cabinet = DocumentStorageUtils.CabinetDirectory(storagePath, cabinetName);
         if (!Directory.Exists(cabinet))
         {
             yield break;
@@ -202,7 +198,7 @@ public sealed class DocumentsStoreService(
     /// <exception cref="DocumentNotFoundException">The cabinet does not hold it.</exception>
     private string GetDocumentDirectory(string cabinetName, Guid documentId)
     {
-        var cabinet = DocumentStorageUtils.CabinetDirectory(root.Path, cabinetName);
+        var cabinet = DocumentStorageUtils.CabinetDirectory(storagePath, cabinetName);
 
         if (Directory.Exists(cabinet))
         {
@@ -240,20 +236,18 @@ public sealed class DocumentsStoreService(
                     "the Archive must carry OpenContent.");
             }
 
-            var part = drafts[order] with
-            {
-                Id = Guid.NewGuid(),
-                Order = order
-            };
+            var id = Guid.NewGuid();
 
             await using var source = openContent();
             await using var target = File.Create(Path.Combine(
-                staging, DocumentStorageUtils.PartsFolder, $"{part.Order:D3}_{part.Id}.bin"));
+                staging, DocumentStorageUtils.PartsFolder, $"{order:D3}_{id}.bin"));
 
             await source.CopyToAsync(target, cancellationToken);
 
-            parts.Add(part with
+            parts.Add(drafts[order] with
             {
+                Id = id,
+                Order = order,
                 SizeInBytes = target.Length,
                 OpenContent = null
             });

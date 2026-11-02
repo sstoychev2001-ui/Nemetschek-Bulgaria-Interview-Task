@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Core.Services.Documents;
+using Nemetschek.Archive.Core.Utils.Documents;
 
 namespace Nemetschek.Archive.Core.Tests.Documents;
 
@@ -22,9 +23,9 @@ public sealed class DocumentsStoreServiceTests : IDisposable
     /// <summary>A store on a prepared, empty storage root.</summary>
     private DocumentsStoreService Store()
     {
-        new DocumentStorageRoot(root).Prepare();
+        Directory.CreateDirectory(DocumentStorageUtils.Staging(root));
 
-        return new DocumentsStoreService(new DocumentStorageRoot(root), clock, logger);
+        return new DocumentsStoreService(root, clock, logger);
     }
 
     [Fact]

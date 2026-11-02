@@ -32,8 +32,7 @@ Nemetschek.Archive/
 │   ├── Domain/       the entities only — Cabinet, IndexField, IndexValue, Document, Part, …
 │   ├── Services/     what the Archive does, including how it stores
 │   │   ├── Cabinets/    CabinetCatalog
-│   │   ├── Documents/   DocumentsService, DocumentsStoreService, DocumentStorageRoot,
-│   │   │                DocumentMetadataFile
+│   │   ├── Documents/   DocumentsService, DocumentsStoreService, DocumentMetadataFile
 │   │   ├── Uploads/     UploadService, UploadPlanningService
 │   │   └── Interfaces/  ICabinetCatalog, IDocumentStore
 │   ├── Utils/        helpers with no rules in them, split by entity
@@ -59,8 +58,11 @@ Nemetschek.Export/                       same shape as the Archive
 ├── Nemetschek.Export.Core/              the export rules — abstractions-only packages, allowlisted
 │   ├── Domain/Exports/     ArchiveDocument, ArchivePart, ExportRequest
 │   ├── Services/Exports/   ExportService — the rules, the naming and the marker in one class
-│   └── Services/Interfaces/ IArchiveClient — the only way to the Archive
-├── Nemetschek.Export.Infrastructure/    ArchiveHttpClient + its own DTOs and registrations
+│   └── Clients/            ArchiveHttpClient, the only way to the Archive
+│       ├── Interfaces/     IArchiveClient — the seam a test fake replaces
+│       ├── Requests/       IndexValuesBatchRequest — the batch marker write
+│       └── Responses/      ArchiveDocumentPageResponse — the page envelope, transport only
+├── Nemetschek.Export.Infrastructure/    AddArchiveClient — the HttpClient and its base address
 ├── Nemetschek.Export.Core.Tests/        one test project per production project
 ├── Nemetschek.Export.Infrastructure.Tests/
 └── Nemetschek.Export.Api.Tests/         boots the scaffold through WebApplicationFactory
@@ -125,7 +127,7 @@ rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` 
 | The marker's wording and date | `ExportService.GetMarker` — `Exported on yyyy-MM-dd`, the UTC date, formatted invariantly |
 | Marking after the content, never before | `ExportService.WriteAsync` — one request after the whole archive is built, naming every document. The marker claims a document was exported, so a failure partway leaves nothing marked |
 | How the Export pages the Archive | `ArchiveHttpClient.ReadDocumentsAsync` — one request made before anything is tested, then a page at a time while the documents yielded so far fall short of the total it reported, yielding lazily as an `IAsyncEnumerable` so a caller that stops early pays for no further page. The condition is tested *after* yielding and before the next fetch, so no page past the end is ever asked for |
-| Reading the Archive from the Export service | `Export.Infrastructure/Archive/ArchiveHttpClient.cs` — over HTTP only, with its own DTOs. Enforced both ways by `No_Archive_project_references_an_Export_project` and `No_Export_project_references_an_Archive_project` |
+| Reading the Archive from the Export service | `Export.Core/Clients/ArchiveHttpClient.cs` — over HTTP only. It deserialises straight into `ArchiveDocument` / `ArchivePart`, which are the wire shape *and* the rules' model in one type, validating themselves in `OnDeserialized`; only the page envelope lives under `Clients/Responses/`. The `HttpClient` it takes is configured in `Export.Infrastructure/ExportServiceCollectionExtensions.cs`, which owns the base address. Enforced both ways by `No_Archive_project_references_an_Export_project` and `No_Export_project_references_an_Archive_project` |
 | Which HTTP status an export refusal answers with | `Export.Api/Middleware/ExportExceptionMiddleware.cs` — what the Archive refused as `400`, an unreachable Archive as `502`, anything unrecognised rethrown for `UseExceptionHandler` |
 | Where the zip is built | `ExportService.WriteAsync` — into a `DeleteOnClose` temp file (`ExportService.Staging`), returned as a readable stream the caller owns and disposes. Building before sending is what keeps a failure a status rather than a truncated `200`; the reasoning is in "The Export service" in `DECISIONS.md` |
 | Reading the Archive from the Export service | `Nemetschek.Export.Infrastructure` _(planned)_ — over HTTP only, with its own DTOs. Enforced both ways by `No_Archive_project_references_an_Export_project` and `No_Export_project_references_an_Archive_project` |
@@ -138,7 +140,7 @@ rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` 
 | Where a document's files go on disk | `Core/Utils/Documents/DocumentStorageUtils.cs` — the folder names, the day and instant formats, and the two parsers that read a path back. Composing a path from them is done where it is used, in `DocumentsStoreService` |
 | The on-disk document format | `[JsonPropertyName]` on `Document` and `Part` themselves, as with `Cabinet` and `IndexField`. `IndexValue` is polymorphic — `[JsonPolymorphic]` writes the `type` discriminator, and every `Type` override needs `[JsonIgnore]` or it is written twice |
 | How an upload is committed | `DocumentsStoreService.AddAsync` — written into `tmp/`, then one atomic `Directory.Move`. A document is complete or absent, never half-written. `DocumentMetadataFile` writes the `document.json` either side of that move |
-| Recovering from an upload that died halfway | `DocumentStorageRoot.Prepare`, called during registration: it clears `tmp/` and recreates it. Startup is the recovery point |
+| Recovering from an upload that died halfway | `DocumentsServiceCollectionExtensions.PrepareStorage`, called from `AddDocumentsStore`: it creates `cabinets/`, then clears and recreates `tmp/`. Registration is the recovery point, and from there on the store takes both directories for granted |
 | Paging a cabinet's documents | `DocumentsStoreService.ListAsync` plus `DocumentPageRequest.Skip`/`Take`, capped by `Archive:MaxPageSize` |
 | What reaches the container log | Four places and no others: the two startup paths in `Program.cs`, the HTTP logging options also in `Program.cs` (one line per request), `DocumentsStoreService.AddAsync` (the document stored, or the failure it could not store), and `ArchiveExceptionMiddleware` (refusals). `README.md` lists the resulting lines |
 | Which log categories are on | `appsettings.json` — `Microsoft.AspNetCore` stays at `Warning`, with `Microsoft.AspNetCore.HttpLogging` named back up to `Information`. Longest-prefix wins, so the specific key beats the general one |
@@ -286,9 +288,13 @@ rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` 
 
 ## The two services and the boundary between them
 
-The Export service reads the Archive **over HTTP and no other way**: `IArchiveClient` in
-`Export.Core` is the only door, `ArchiveHttpClient` in `Export.Infrastructure` is the only
-implementation, and it keeps its own DTOs rather than sharing a type with the Archive. Two
+The Export service reads the Archive **over HTTP and no other way**: `IArchiveClient` is the only
+door and `ArchiveHttpClient` the only implementation, both under `Export.Core/Clients/`, and it
+keeps its own request and document types rather than sharing one with the Archive — and those
+document types are single records carrying both the JSON attributes and the rules' invariants, the
+same way the Archive's `Document` does. What stayed in
+`Export.Infrastructure` is the `HttpClient` registration — the base address, the trailing slash and
+the infinite timeout a streamed export needs — so `Core` names no package for any of it. Two
 architecture tests enforce that neither service references the other.
 
 What that boundary costs, and why it is worth it: the Export cannot filter by date, read content or
@@ -311,7 +317,7 @@ a moment before the first export.
 
 ```bash
 dotnet build          # warnings are errors
-dotnet test           # offline, no containers — 444 tests across six test projects
+dotnet test           # offline, no containers — 448 tests across six test projects
 docker compose up --build -d          # both services; give the Archive a moment before exporting
 
 # Running from source needs both paths, because neither is defaulted:

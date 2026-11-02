@@ -9,8 +9,7 @@ using Nemetschek.Archive.Core.Validation.Documents;
 namespace Nemetschek.Archive.Api.Controllers;
 
 /// <summary>
-/// The documents of one file cabinet: reading them, reading a part's content, and writing index
-/// values back.
+/// The documents of one file cabinet: reading them, reading a part's content, and writing index values back.
 /// </summary>
 [ApiController]
 [Route("cabinets/{cabinetName}/documents")]

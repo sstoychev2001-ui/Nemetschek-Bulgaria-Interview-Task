@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Nemetschek.Archive.Core.Services.Documents;
 using Nemetschek.Archive.Core.Services.Interfaces.Documents;
+using Nemetschek.Archive.Core.Utils.Documents;
 
 namespace Nemetschek.Archive.Infrastructure;
 
@@ -30,18 +31,34 @@ public static class DocumentsServiceCollectionExtensions
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storagePath);
 
-        var root = new DocumentStorageRoot(
-            CabinetsServiceCollectionExtensions.ResolvePath(storagePath, basePath));
+        var resolvedStoragePath =
+            CabinetsServiceCollectionExtensions.ResolvePath(storagePath, basePath);
 
-        root.Prepare();
+        PrepareStorage(resolvedStoragePath);
 
-        services.AddSingleton(root);
         services.AddSingleton<IDocumentStore>(provider => new DocumentsStoreService(
-            root,
+            resolvedStoragePath,
             TimeProvider.System,
             provider.GetRequiredService<ILogger<DocumentsStoreService>>()));
         services.AddScoped<DocumentsService>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Creates the storage directories and clears whatever an upload left in flight.
+    /// </summary>
+    /// <exception cref="IOException">The storage directory cannot be created or cleared.</exception>
+    private static void PrepareStorage(string resolvedStoragePath)
+    {
+        Directory.CreateDirectory(Path.Combine(resolvedStoragePath, DocumentStorageUtils.CabinetsFolder));
+
+        var staging = DocumentStorageUtils.Staging(resolvedStoragePath);
+        if (Directory.Exists(staging))
+        {
+            Directory.Delete(staging, recursive: true);
+        }
+
+        Directory.CreateDirectory(staging);
     }
 }

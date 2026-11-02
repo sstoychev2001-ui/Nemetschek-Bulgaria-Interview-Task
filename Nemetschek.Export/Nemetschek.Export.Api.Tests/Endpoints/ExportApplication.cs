@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using Nemetschek.Export.Core.Services.Interfaces;
+using Nemetschek.Export.Core.Clients.Interfaces;
 
 namespace Nemetschek.Export.Api.Tests.Endpoints;
 
@@ -15,12 +15,9 @@ internal sealed class ExportApplication(IArchiveClient archive)
     /// <summary>The origins the client may be served from, as `Export:AllowedOrigins` would set them.</summary>
     public string AllowedOrigins { get; init; } = "";
 
-    /// <summary>Where the Archive is, blank to run as if the setting were never supplied.</summary>
-    public string ArchiveBaseAddress { get; init; } = "http://archive-api.invalid:8080";
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseSetting("Export:ArchiveBaseAddress", ArchiveBaseAddress);
+        builder.UseSetting("Export:ArchiveBaseAddress", "http://archive-api.invalid:8080");
         builder.UseSetting("Export:AllowedOrigins", AllowedOrigins);
         builder.UseEnvironment("Production");
 

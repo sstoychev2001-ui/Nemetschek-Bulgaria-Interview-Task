@@ -1,16 +1,17 @@
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
+using Nemetschek.Export.Core.Clients.Interfaces;
+using Nemetschek.Export.Core.Clients.Requests;
+using Nemetschek.Export.Core.Clients.Responses;
 using Nemetschek.Export.Core.Domain.Exports;
-using Nemetschek.Export.Core.Services.Interfaces;
 
-namespace Nemetschek.Export.Infrastructure.Archive;
+namespace Nemetschek.Export.Core.Clients;
 
 /// <summary>
 /// An <see cref="IArchiveClient"/> that reads the Archive over its HTTP API.
 /// </summary>
-public sealed class ArchiveHttpClient(HttpClient http)
-    : IArchiveClient
+public sealed class ArchiveHttpClient(HttpClient http) : IArchiveClient
 {
     /// <inheritdoc />
     /// <exception cref="HttpRequestException">The Archive refused the request or is unreachable.</exception>
@@ -30,7 +31,7 @@ public sealed class ArchiveHttpClient(HttpClient http)
             foreach (var document in page.Documents)
             {
                 read++;
-                yield return document.ToDocument();
+                yield return document;
             }
 
             if (read >= page.Total)
@@ -45,7 +46,7 @@ public sealed class ArchiveHttpClient(HttpClient http)
     /// <summary>Reads one page of a cabinet's documents.</summary>
     /// <exception cref="HttpRequestException">The Archive refused the request or is unreachable.</exception>
     /// <exception cref="InvalidDataException">The Archive answered something unusable.</exception>
-    private async Task<ArchiveDocumentPageDto> ReadDocumentPageAsync(
+    private async Task<ArchiveDocumentPageResponse> ReadDocumentPageAsync(
         string cabinetName,
         DateOnly from,
         DateOnly to,
@@ -61,7 +62,7 @@ public sealed class ArchiveHttpClient(HttpClient http)
 
         response.EnsureSuccessStatusCode();
 
-        return await response.Content.ReadFromJsonAsync<ArchiveDocumentPageDto>(cancellationToken)
+        return await response.Content.ReadFromJsonAsync<ArchiveDocumentPageResponse>(cancellationToken)
             ?? throw new InvalidDataException("The Archive returned an empty body for a page of documents.");
     }
 
@@ -95,14 +96,12 @@ public sealed class ArchiveHttpClient(HttpClient http)
     {
         var response = await http.PatchAsJsonAsync(
             $"cabinets/{Uri.EscapeDataString(cabinetName)}/documents/index-values",
-            new
-            {
+            new IndexValuesBatchRequest(
                 documentIds,
-                values = new Dictionary<string, object>
+                new Dictionary<string, IndexValueRequest>
                 {
-                    [fieldName] = new { type = "Text", value },
-                },
-            },
+                    [fieldName] = new IndexValueRequest("Text", value),
+                }),
             cancellationToken);
 
         response.EnsureSuccessStatusCode();

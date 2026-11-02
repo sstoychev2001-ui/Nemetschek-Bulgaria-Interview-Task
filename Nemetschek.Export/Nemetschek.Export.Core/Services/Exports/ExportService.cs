@@ -2,7 +2,7 @@ using System.Globalization;
 using System.IO.Compression;
 using Microsoft.Extensions.Logging;
 using Nemetschek.Export.Core.Domain.Exports;
-using Nemetschek.Export.Core.Services.Interfaces;
+using Nemetschek.Export.Core.Clients.Interfaces;
 
 namespace Nemetschek.Export.Core.Services.Exports;
 

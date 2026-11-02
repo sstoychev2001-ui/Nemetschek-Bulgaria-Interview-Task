@@ -1,6 +1,6 @@
 using Nemetschek.Export.Core.Domain.Exports;
 
-namespace Nemetschek.Export.Core.Services.Interfaces;
+namespace Nemetschek.Export.Core.Clients.Interfaces;
 
 /// <summary>
 /// The Archive, as the Export service is allowed to reach it: over HTTP, and nothing else.

@@ -50,10 +50,8 @@ public sealed class ArchiveExceptionMiddleware(
         UnknownCabinetException => new Refusal(StatusCodes.Status404NotFound, "Unknown file cabinet"),
         DocumentNotFoundException => new Refusal(StatusCodes.Status404NotFound, "Unknown document"),
         UploadRefusedException => new Refusal(StatusCodes.Status400BadRequest, "The upload was refused"),
-        IndexValueRefusedException => new Refusal(
-            StatusCodes.Status400BadRequest, "The index value was refused"),
-        InvalidDateRangeException => new Refusal(
-            StatusCodes.Status400BadRequest, "The date range is not usable"),
+        IndexValueRefusedException => new Refusal(StatusCodes.Status400BadRequest, "The index value was refused"),
+        InvalidDateRangeException => new Refusal(StatusCodes.Status400BadRequest, "The date range is not usable"),
         _ => throw exception
     };
 

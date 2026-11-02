@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Nemetschek.Export.Core.Services.Exports;
-using Nemetschek.Export.Core.Services.Interfaces;
-using Nemetschek.Export.Infrastructure.Archive;
+using Nemetschek.Export.Core.Clients.Interfaces;
+using Nemetschek.Export.Core.Clients;
 
 namespace Nemetschek.Export.Infrastructure;
 

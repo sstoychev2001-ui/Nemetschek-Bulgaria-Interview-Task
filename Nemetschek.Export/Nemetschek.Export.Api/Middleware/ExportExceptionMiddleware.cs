@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Nemetschek.Export.Api.Middleware;
@@ -55,13 +56,12 @@ public sealed class ExportExceptionMiddleware(
     /// </summary>
     private static Refusal Map(Exception exception) => exception switch
     {
-        HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest or
-            System.Net.HttpStatusCode.NotFound } => new Refusal(
-            StatusCodes.Status400BadRequest, "The Archive refused the export"),
-        HttpRequestException => new Refusal(
-            StatusCodes.Status502BadGateway, "The Archive is unreachable"),
-        InvalidDataException => new Refusal(
-            StatusCodes.Status502BadGateway, "The Archive answered something unusable"),
+        HttpRequestException
+        {
+            StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.NotFound
+        } => new Refusal(StatusCodes.Status400BadRequest, "The Archive refused the export"),
+        HttpRequestException => new Refusal(StatusCodes.Status502BadGateway, "The Archive is unreachable"),
+        InvalidDataException => new Refusal(StatusCodes.Status502BadGateway, "The Archive answered something unusable"),
         _ => throw exception,
     };
 

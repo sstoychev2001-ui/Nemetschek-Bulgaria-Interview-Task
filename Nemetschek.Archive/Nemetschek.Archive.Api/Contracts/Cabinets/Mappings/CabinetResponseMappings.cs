@@ -1,6 +1,7 @@
 using Nemetschek.Archive.Api.Contracts.Cabinets.Responses;
 using Nemetschek.Archive.Core.Domain.Cabinets;
 using Nemetschek.Archive.Core.Domain.IndexFields;
+using Nemetschek.Archive.Core.Validation.IndexFields;
 
 namespace Nemetschek.Archive.Api.Contracts.Cabinets.Mappings;
 
@@ -14,17 +15,16 @@ public static class CabinetResponseMappings
         new([.. cabinets.Select(cabinet => cabinet.ToResponse())]);
 
     /// <summary>Maps one file cabinet onto the wire shape.</summary>
-    public static CabinetResponse ToResponse(this Cabinet cabinet)
-    {
-        var choosable = cabinet.WritableTextFields.Select(field => field.Name).ToHashSet(
-            StringComparer.OrdinalIgnoreCase);
-
-        return new CabinetResponse(
-            cabinet.Name,
+    public static CabinetResponse ToResponse(this Cabinet cabinet) =>
+        new(cabinet.Name,
             cabinet.DisplayName,
-            [.. cabinet.Fields.Select(field => field.ToResponse(choosable.Contains(field.Name)))]);
-    }
+            [.. cabinet.Fields.Select(field => field.ToResponse(cabinet))]);
 
-    private static IndexFieldResponse ToResponse(this IndexField field, bool choosable) =>
-        new(field.Name, field.Label, field.Type, field.MaxLength, field.Writable, choosable);
+    private static IndexFieldResponse ToResponse(this IndexField field, Cabinet cabinet) =>
+        new(field.Name,
+            field.Label,
+            field.Type,
+            field.MaxLength,
+            field.Writable,
+            IndexFieldRules.ValidateChosenTextField(cabinet, field.Name) is null);
 }

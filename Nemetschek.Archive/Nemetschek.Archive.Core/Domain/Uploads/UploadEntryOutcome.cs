@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using Nemetschek.Archive.Core.Domain.IndexFields;
 
 namespace Nemetschek.Archive.Core.Domain.Uploads;
 

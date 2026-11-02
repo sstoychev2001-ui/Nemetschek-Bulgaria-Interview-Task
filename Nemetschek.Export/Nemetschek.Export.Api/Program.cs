@@ -19,15 +19,15 @@ builder.Services.AddHttpLogging(options =>
     options.CombineLogs = true;
 });
 
-var archiveBaseAddress = builder.Configuration["Export:ArchiveBaseAddress"] is { } address &&
-                         !string.IsNullOrWhiteSpace(address)
-    ? address
-    : throw new InvalidOperationException("Setting 'Export:ArchiveBaseAddress' is required");
+var archiveBaseAddress = builder.Configuration["Export:ArchiveBaseAddress"]
+    ?? throw new InvalidOperationException("Setting 'Export:ArchiveBaseAddress' is required");
+
+var allowedOrigins = builder.Configuration["Export:AllowedOrigins"]
+    ?? throw new InvalidOperationException("Setting 'Export:AllowedOrigins' is required");
+
+var origins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
 builder.Services.AddArchiveClient(archiveBaseAddress);
-
-var allowedOrigins = (builder.Configuration["Export:AllowedOrigins"] ?? "")
-    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 {
@@ -35,13 +35,13 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
         .AllowAnyHeader()
         .WithExposedHeaders("Content-Disposition");
 
-    if (allowedOrigins.Length == 0)
+    if (origins.Length == 0)
     {
         policy.AllowAnyOrigin();
     }
     else
     {
-        policy.WithOrigins(allowedOrigins);
+        policy.WithOrigins(origins);
     }
 }));
 

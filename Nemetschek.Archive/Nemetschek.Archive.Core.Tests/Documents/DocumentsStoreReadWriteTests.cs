@@ -4,6 +4,7 @@ using Nemetschek.Archive.Core.Domain.Documents;
 using Nemetschek.Archive.Core.Domain.IndexFields;
 using Nemetschek.Archive.Core.Exceptions.Documents;
 using Nemetschek.Archive.Core.Services.Documents;
+using Nemetschek.Archive.Core.Utils.Documents;
 using Nemetschek.Archive.Core.Validation.Documents;
 
 namespace Nemetschek.Archive.Core.Tests.Documents;
@@ -22,9 +23,9 @@ public sealed class DocumentsStoreReadWriteTests : IDisposable
 
     public DocumentsStoreReadWriteTests()
     {
-        new DocumentStorageRoot(root).Prepare();
+        Directory.CreateDirectory(DocumentStorageUtils.Staging(root));
         store = new DocumentsStoreService(
-            new DocumentStorageRoot(root), clock, NullLogger<DocumentsStoreService>.Instance);
+            root, clock, NullLogger<DocumentsStoreService>.Instance);
     }
 
     [Fact]
