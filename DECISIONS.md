@@ -1335,6 +1335,60 @@ Found but not yet fixed, so they are not mistaken for decisions.
   by reading the planner, not by a test — the gap it sits in is on the
   "The upload endpoint" in `DECISIONS.md` §5 checklist as "traversal / absolute / reserved names neutralised".
 
+## The OpenAPI descriptions
+
+- **The endpoints and parameters are described with `[EndpointSummary]`, `[EndpointDescription]` and
+  `[Description]` rather than by the XML `<summary>` blocks already on them, because** .NET 9's
+  `Microsoft.AspNetCore.OpenApi` does not read XML doc comments — that arrived in .NET 10. Verified
+  before writing anything rather than assumed: the generated `/openapi/v1.json` carried no `summary`
+  and no parameter `description` at all, despite every controller action having had a `<summary>` and
+  a `<param>` for each argument since it was written. Swagger showed bare operation ids and untyped
+  parameters, so the documentation a reviewer actually opens was empty.
+  Four placements were probed against the running service, and three of the four work on 9.0:
+  `[EndpointSummary]` / `[EndpointDescription]` on a controller action, `[Description]` on an action
+  parameter, and `[Description]` on a property of a JSON body. The fourth — `[Description]` on a
+  property of a `[FromQuery]` or `[FromForm]` model — is dropped, and `[Display(Description = …)]`
+  does not fill the gap either.
+- **That fourth case is left as a gap, because** closing it needs machinery, and on instruction
+  (2026-11-02) the descriptions are attributes and nothing else. Eight parameters are therefore
+  undescribed in Swagger — the four paging values on `GET /documents` and the four multipart fields
+  on `POST /uploads` — so 36 of the 44 operations, parameters and request fields carry text. The
+  `[Description]` attributes stay on those eight properties regardless: they document the code, they
+  cost nothing, and they begin working by themselves on .NET 10.
+  A ~50-line `IOpenApiOperationTransformer` was written and verified to close the gap (44 of 44),
+  then deleted when the call was made. It read the same `[Description]` off the property the
+  parameter was bound from, so it restated nothing; it was removed for being custom code in a place
+  a reviewer expects an attribute, not for being wrong. If the gap ever matters, that is the shape
+  to restore, and `Swashbuckle.AspNetCore.SwaggerGen` with `IncludeXmlComments` is the alternative —
+  it would delete every attribute here in favour of the `<summary>` blocks the code already carries,
+  at the price of a second OpenAPI generator beside the Microsoft one.
+- **Flattening the two models onto their action signatures was tried and refused, because** it does
+  not work and makes one endpoint worse. Verified, not assumed: with the four form fields as
+  individual `[FromForm]` action parameters the descriptions are *still* dropped, and the request
+  body degrades from `multipart/form-data` to `application/x-www-form-urlencoded` with the schema
+  split into an `allOf` of three single-property objects — which breaks file upload from Swagger UI.
+  Flattening the *query* model does carry the descriptions through, but costs four more action
+  parameters and leaves `Take`/`Skip` without a home, against this repository's own conventions.
+- **The cost, stated plainly:** an endpoint now carries its description twice — once as `<summary>`
+  for IntelliSense, once as an attribute for the wire — and the two can drift. Collapsing them was
+  weighed and refused: it would mean adding `Swashbuckle.AspNetCore.SwaggerGen` and
+  `GenerateDocumentationFile` to run a second OpenAPI generator beside the Microsoft one, for a
+  service that already serves a document. On .NET 10 the attributes become removable and the
+  `<summary>` blocks alone would do.
+- **One gap is left and is a framework limit, not a choice:** `IndexValueRequest.Type` is an enum,
+  the generator hoists every enum into its own component schema and references it, and OpenAPI 3.0
+  ignores anything written beside a `$ref`. A schema transformer was written to wrap the reference
+  in an `allOf` so the description had somewhere to sit, and it was deleted after a probe showed the
+  property is still inline when schema transformers run — the `$ref` is created afterwards, so there
+  was nothing to wrap. Rather than ship a class that does nothing, the sentence it would have
+  carried was folded into the sibling `Value` description. The enum still renders its three allowed
+  values, so a caller is not left guessing.
+- **The Export has no gap at all**, because its one endpoint takes a JSON body, where
+  `[Description]` works — all six of its operation and parameter descriptions reach the wire.
+- **Request parameters are described; response schemas are not.** The brief's ask was what each
+  endpoint does and what each parameter means. The response records still carry only their
+  `<summary>`, so their properties appear in Swagger undescribed.
+
 ## Known limits of the storage
 
 Deliberate, not oversights, and each one is where that part of the system breaks first.
@@ -1447,7 +1501,7 @@ refusal, with a storage failure at `Error`).
 
 | Gap | Brief | Note |
 |---|---|---|
-| **The web client** | Priority 4 | Not started. Both services have browsable OpenAPI, which the brief accepts as the fallback demo |
+| **The web client** | Priority 4 | Not started — there is no client code in the repository at all. Both services have browsable OpenAPI, now with every endpoint and parameter described, which the brief accepts as the fallback demo. Three of the brief's client requirements are therefore unmet rather than partly met: "the client never repeats a rule that belongs to the server", "it shows when a request is in flight", and "the same request cannot be started twice by accident". The first is the one the *services* can help with, and they do — `GET /cabinets` answers `choosable` so a field picker need not restate "writable and text", and every refusal is a finished sentence the client can display verbatim. The other two are purely client-side and nothing anywhere enforces them. Worth stating plainly for the review: **the server offers no protection against a double submit.** An upload is deliberately not idempotent — uploading the same folder twice creates a second full set of documents, which is exactly what the round trip does on purpose — and there is no idempotency key, no request id and no dedupe, so an accidental second click silently duplicates data. A repeated export is milder but not free: it re-marks the same documents and overwrites their markers |
 | **The HTTP surface has no tests** | Acceptance criteria | Since the endpoint tests were removed on 2026-11-02 (see "The endpoint tests were removed"), `Program.cs` and all four controllers are executed by no test. The upload and export *rules* are still covered, because they live in `Core` — what is not covered is that a route hands them the right input and returns the right status. "Failures reach callers in one documented shape for every endpoint" is now asserted only for `ArchiveExceptionMiddleware` in isolation, and the page cap only as arithmetic in `DocumentPageRequestTests`, not as the controller actually applying `PagingLimits` |
 | **Time zones** | Things your system must cope with | Removed on instruction — see the coping table and "Removed: the time zone parameter" for the measurement and how to reinstate it |
 | **Two error shapes, not one** | Acceptance criteria | A rule refusal is `ProblemDetails`; a missing form field is ASP.NET's `ValidationProblemDetails`. Both documented in `README.md`; reconciling them is open |
@@ -1602,7 +1656,7 @@ Where the AI was wrong, and how it was caught.
 
 ## Time log
 
-Rough, as the brief asks for, and grouped per session rather than per prompt. ~34.6 h in total.
+Rough, as the brief asks for, and grouped per session rather than per prompt. ~35.7 h in total.
 
 | Date | Time | What |
 |---|---|---|
@@ -1645,4 +1699,6 @@ Rough, as the brief asks for, and grouped per session rather than per prompt. ~3
 | 2026-11-02 | ~0.3 h | Gathered every non-test class in the test projects into its project's `Utils/` — the two `WebApplicationFactory` hosts, both `RepositoryLayout` copies, both `RepositoryFixtures`, `TestCabinets` (with its own test, which follows its subject) and `FakeArchive`. Removed the ten CORS endpoint tests on instruction, as framework behaviour rather than this system's rules; recorded what that gives up, since those tests are what caught `app.UseCors()` going missing the day before. 442 tests, 0 warnings |
 | 2026-11-02 | ~0.9 h | Converted all six test projects from xUnit to MSTest 3.11.1 at request — 37 files, no production code touched. Most of it was mechanical, but one difference is silent rather than loud: xUnit's `Assert.Equal` compares two `IEnumerable`s element by element and MSTest's `Assert.AreEqual` compiles on the same arguments and compares references, so a plain rename would have left ~60 sequence assertions green and worthless. Those are now `CollectionAssert.AreEqual` over arrays, found by scanning for a collection-expression expected argument and then re-reading every remaining `AreEqual` by hand. Argument order reverses for `ContainsSingle`/`Contains`/`DoesNotContain`, `Throws` and `ThrowsExactly` swap strictness, `IsInstanceOfType` returns `void` so eleven call sites take its `out` parameter, and `Assert.All` has no equivalent. Verified by mutation rather than by the suite going green: reversing the two `OrderBy`s in `UploadPlanningService` fails 8 of the converted collection assertions, and breaking the export marker's format fails the converted `Assert.All`. 292 tests, 0 warnings |
 | 2026-11-02 | ~1.1 h | Reshaped the suite around MSTest's own vocabulary and Moq, in four passes on instruction. `[TestInitialize]`/`[TestCleanup]` replaced the xUnit-shaped constructor and `IDisposable` in nine classes; the `private Service()` factories became fields built in `BeforeEach`; `CapturingProblemDetailsService`, two `RecordingLogger`s and `FakeArchive` became `Mock<T>`s with capture lists; and `DocumentsStoreReadWriteTests` merged into `DocumentsStoreServiceTests` — 37 tests spliced verbatim from both files so the merge could not reword an assertion. Removed every test that boots a `WebApplicationFactory` host: four Archive endpoint files, the Export's one, both hosts and the `Mvc.Testing` reference, 56 tests. Recorded what that costs rather than letting the number speak — `Program.cs` and the controllers are now executed by nothing, so the statuses, error shapes, page cap and CORS are unverified by `dotnet test` and Api coverage drops from 99% to about 56%. Mutation-checked the rewrites rather than trusting green: the mocked logger catches a level change in both the middleware and the store, the mocked Archive catches a marker-format change in 3 tests, and a status-code change fails 2. Also renamed every `_`-prefixed private field to plain lowercase, including one in `CabinetCatalog`. 225 tests, 0 warnings |
+| 2026-11-02 | ~0.2 h | Analysis only, three questions answered from the code: what `folderName` is for on the upload endpoint (it is the index value — `UploadPlanningService` writes it into the chosen field on every document, `UploadService.Refuse` validates it first, `UploadReport` echoes it back); why an export appears to work only with `Batch` (it does not — the marker field must be writable text with `maxLength` ≥ 22, which on the fixture's `Invoices` is `Supplier` as well as `Batch`, while `InvoiceNumber` at 20 and `Status` at 12 are too short); and a full summary of the business rules of both services. Two things surfaced on the way and are recorded rather than fixed: a bad `markerField` is only discovered after the whole zip has been built, and an export whose window matches no documents skips the marker write entirely, so it answers `200` with an unusable marker field undetected. Also found `AGENTS.md` naming `ExportService.GetMarker` and `ExportService.Staging`, neither of which exists — both corrected. A fourth question asked how we know the brief's client rule holds: we do not, because there is no client, and the double-submit half of it has no server-side protection either — recorded against the web-client gap. No code change |
+| 2026-11-02 | ~0.9 h | Gave every endpoint and parameter a description that reaches Swagger. Started by checking rather than assuming, which was the whole finding: .NET 9's `Microsoft.AspNetCore.OpenApi` does not read XML doc comments, so the `<summary>` and `<param>` blocks each controller action already had were invisible — the generated document had no `summary` and no parameter `description` anywhere. Probed four attribute placements against the running service; three work, and `[Description]` on a property of a `[FromQuery]` or `[FromForm]` model is dropped, as is `[Display(Description = …)]`. Closed that with a 50-line operation transformer, audited the live document of both services at 44 of 44, and then **deleted the transformer on instruction**: the descriptions are to be attributes and nothing else, leaving the eight query and form parameters it covered undescribed at 36 of 44. Checked first whether attributes alone could reach them by flattening the models onto the actions — they cannot, and for the upload it is worse than the gap, because the multipart body degrades to `application/x-www-form-urlencoded` and Swagger UI can no longer send a file. Also wrote and deleted a second transformer for the enum `$ref` case, which could not work at all — the property is still inline when schema transformers run — and folded its sentence into the sibling field instead. 225 tests, 0 warnings |
 | 2026-11-02 | ~0.4 h | Audited the two services against `TASK.md` line by line, excluding the web client, rather than against what the documents claimed. Everything the brief asks of the Archive and the Export is built and reachable: the cabinet schema, the upload rules, the paged date-range read, the index-value write-back, durable storage, the zip layout, the marker, both containers, the logs and the OpenAPI. Four gaps stand, now all in one table: the client, the HTTP surface having no tests since the endpoint tests were removed, time zones, and the two error shapes. Found three places that still justified a decision by the time-zone behaviour deleted on 2026-10-30 — the Debian base image, `InvariantGlobalization`, and the comment in `Directory.Build.props` — and corrected all three to say the reason lapsed rather than leaving a reviewer a rationale the code no longer matches. Also corrected the summary's stale "411 passing tests" to 225. No code change |

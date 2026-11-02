@@ -184,14 +184,14 @@ ASPNETCORE_ENVIRONMENT=Production dotnet run --no-launch-profile \
 | `GET /cabinets/{cabinetName}/documents` | A page of stored documents, oldest first. `?page=1&size=20&from=2026-03-01&to=2026-03-31`, capped by `Archive:MaxPageSize`. The dates are inclusive calendar dates **in UTC**, filtered on `StoredAt`. |
 | `GET /cabinets/{cabinetName}/documents/{id}/parts/{partId}/content` | One part's bytes, streamed. `404` if the document or the part is not there. |
 | `PATCH /cabinets/{cabinetName}/documents/index-values` | Set the same index values on one or many documents. `{"documentIds":["…"],"values":{"Batch":{"type":"Text","value":"…"}}}`. `400` if a value breaks a field rule, `404` if the cabinet does not hold one of the ids — in both cases nothing is written. Answers `{"cabinet":"…","updated":24}`. |
-| `/swagger`, `/openapi/v1.json` | Browsable OpenAPI |
+| `/swagger`, `/openapi/v1.json` | Browsable OpenAPI. Every endpoint carries a summary and a description there, as does every path parameter and JSON body field, so `/swagger` is the reference and this table is the summary. Two sets are blank on .NET 9 and the rows above are where to read them instead: the four paging values on `GET /documents` and the four multipart fields on `POST /uploads` — see "The OpenAPI descriptions" in [`DECISIONS.md`](DECISIONS.md) |
 
 **The Export service**, on `http://localhost:8081`:
 
 | Path | Purpose |
 |---|---|
 | `POST /exports` | Build a zip of a cabinet's documents and download it. Body below. `400` for a bad request or anything the Archive refused; `502` when the Archive is unreachable. |
-| `/swagger`, `/openapi/v1.json` | Browsable OpenAPI |
+| `/swagger`, `/openapi/v1.json` | Browsable OpenAPI, described the same way |
 
 ## Exporting
 

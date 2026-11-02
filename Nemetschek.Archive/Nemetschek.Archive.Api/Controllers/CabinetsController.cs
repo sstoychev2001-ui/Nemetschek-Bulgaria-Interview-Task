@@ -15,6 +15,11 @@ public sealed class CabinetsController(ICabinetCatalog cabinets) : ControllerBas
 {
     /// <summary>Lists every file cabinet with its index fields.</summary>
     [HttpGet]
+    [EndpointSummary("List the file cabinets")]
+    [EndpointDescription(
+        "Every file cabinet the Archive was deployed with, each with its index fields. A field " +
+        "reports its type, its maximum length, whether a client may write it, and whether it may " +
+        "be chosen as an upload field or an export marker field.")]
     [ProducesResponseType<CabinetsResponse>(StatusCodes.Status200OK)]
     public CabinetsResponse Cabinets() => cabinets.All.ToResponse();
 }

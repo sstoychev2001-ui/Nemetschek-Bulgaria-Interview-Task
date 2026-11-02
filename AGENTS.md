@@ -138,12 +138,12 @@ rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` 
 | Which HTTP status a refusal answers with | `Api/Middleware/ArchiveExceptionMiddleware.cs` — a `switch` over the expected exception types, one arm each. `UnknownCabinetException` → `404`, `UploadRefusedException` → `400`, anything else rethrown for `UseExceptionHandler` → `500`. A new expected refusal is one more arm |
 | Zip layout (file / folder / empty folder per document) | `Export.Core/Services/Exports/ExportService.WriteDocumentAsync`. See "The Export service" in `DECISIONS.md` |
 | Duplicate-title naming (` (2)`, ` (3)`, before the extension) | `ExportService.GetEntryName` — the only place. It takes the table of names already used, so the same call names documents across the archive and parts inside one folder-document, each with its own table |
-| The marker's wording and date | `ExportService.GetMarker` — `Exported on yyyy-MM-dd`, the UTC date, formatted invariantly |
+| The marker's wording and date | `ExportService.WriteAsync`, first statement — `Exported on yyyy-MM-dd`, the UTC date, formatted invariantly. 22 characters, which is the real constraint on a marker field: it must be writable text with `maxLength` at least that |
 | Marking after the content, never before | `ExportService.WriteAsync` — one request after the whole archive is built, naming every document. The marker claims a document was exported, so a failure partway leaves nothing marked |
 | How the Export pages the Archive | `ArchiveHttpClient.ReadDocumentsAsync` — one request made before anything is tested, then a page at a time while the documents yielded so far fall short of the total it reported, yielding lazily as an `IAsyncEnumerable` so a caller that stops early pays for no further page. The condition is tested *after* yielding and before the next fetch, so no page past the end is ever asked for |
 | Reading the Archive from the Export service | `Export.Core/Clients/ArchiveHttpClient.cs` — over HTTP only. It deserialises straight into `ArchiveDocument` / `ArchivePart`, which are the wire shape *and* the rules' model in one type, validating themselves in `OnDeserialized`; only the page envelope lives under `Clients/Responses/`. The `HttpClient` it takes is configured in `Export.Infrastructure/ExportServiceCollectionExtensions.cs`, which owns the base address. Enforced both ways by `No_Archive_project_references_an_Export_project` and `No_Export_project_references_an_Archive_project` |
 | Which HTTP status an export refusal answers with | `Export.Api/Middleware/ExportExceptionMiddleware.cs` — what the Archive refused as `400`, an unreachable Archive as `502`, anything unrecognised rethrown for `UseExceptionHandler` |
-| Where the zip is built | `ExportService.WriteAsync` — into a `DeleteOnClose` temp file (`ExportService.Staging`), returned as a readable stream the caller owns and disposes. Building before sending is what keeps a failure a status rather than a truncated `200`; the reasoning is in "The Export service" in `DECISIONS.md` |
+| Where the zip is built | `ExportService.WriteAsync` — into a `DeleteOnClose` temp file opened there, returned as a readable stream the caller owns and disposes. Building before sending is what keeps a failure a status rather than a truncated `200`; the reasoning is in "The Export service" in `DECISIONS.md` |
 | Reading the Archive from the Export service | `Nemetschek.Export.Infrastructure` _(planned)_ — over HTTP only, with its own DTOs. Enforced both ways by `No_Archive_project_references_an_Export_project` and `No_Export_project_references_an_Archive_project` |
 | Date-range semantics (inclusive calendar dates, UTC) | `Core/Validation/Documents/CalendarRange.cs` — turns two calendar dates into a half-open window of UTC instants; `Domain/Documents/StoredRange.cs` holds it and prunes whole days. There is no time-zone parameter: see "Removed: the time zone parameter" in `DECISIONS.md` |
 | Reading a part's content | `DocumentsController.PartContent` → `DocumentsService.OpenPartAsync` → `DocumentsStoreService.OpenPartAsync`, which streams the part file from disk |
@@ -158,6 +158,8 @@ rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` 
 | Paging a cabinet's documents | `DocumentsStoreService.ListAsync` plus `DocumentPageRequest.Skip`/`Take`, capped by `Archive:MaxPageSize` |
 | What reaches the container log | Four places and no others: the two startup paths in `Program.cs`, the HTTP logging options also in `Program.cs` (one line per request), `DocumentsStoreService.AddAsync` (the document stored, or the failure it could not store), and `ArchiveExceptionMiddleware` (refusals). `README.md` lists the resulting lines |
 | Which log categories are on | `appsettings.json` — `Microsoft.AspNetCore` stays at `Warning`, with `Microsoft.AspNetCore.HttpLogging` named back up to `Information`. Longest-prefix wins, so the specific key beats the general one |
+| What Swagger says an endpoint does | `[EndpointSummary]` and `[EndpointDescription]` on the action, in the controller. These reach the OpenAPI document; the `<summary>` block beside them does not — .NET 9's `Microsoft.AspNetCore.OpenApi` does not read XML doc comments, which is why the two are stated separately |
+| What Swagger says a parameter is | `[Description]` on the thing itself: the action parameter for a path value, the property for a query, form or body field. Attributes only, no transformer — note the two places .NET 9 **drops** it, listed under "The OpenAPI descriptions" in `DECISIONS.md`: a property of a `[FromQuery]` model (`DocumentPageRequest`) and of a `[FromForm]` model (`UploadFormRequest`). Those eight parameters are deliberately undescribed on the wire; the attributes stay on them so they document the code and start working on .NET 10 |
 | How the service is containerised | `Nemetschek.Archive.Api/Dockerfile` and the root `docker-compose.yml` |
 
 ## Conventions
@@ -217,6 +219,16 @@ rather than adding a second `.sln`. All twelve projects are in `Nemetschek.sln` 
   `maxLength` counts UTF-16 code units (`string.Length`), matching `nvarchar(n)`.
 - **Timestamps in UTC.** Time-zone conversion happens only where the user's calendar dates are
   interpreted.
+- **An endpoint and every parameter it takes carry a description that reaches Swagger.** An action
+  gets `[EndpointSummary]` (a few words) and `[EndpointDescription]` (what it does, and what the
+  caller has to know to use it). A path value gets `[Description]` on the action parameter; a
+  query, form or body field gets `[Description]` on the property. The XML `<summary>` does *not*
+  reach Swagger on .NET 9, so a new endpoint needs the attributes as well — check `/openapi/v1.json`
+  rather than assuming, because a missing description is silent. Two cases do not reach the wire at
+  all on this framework version and are accepted as gaps rather than worked around: a property of a
+  `[FromQuery]` or `[FromForm]` model. Write the attribute anyway; do not add a transformer for it,
+  and do not flatten the model onto the action to get around it — that was tried and the multipart
+  body degrades to `application/x-www-form-urlencoded`, which breaks file upload in Swagger UI.
 - **A `<summary>` says what a member does, in a line or two.** No rationale and no implementation detail
   inside the doc block — IntelliSense shows the summary, so it has to be scannable. Where the *why*
   guards against a future mistake, put it in a plain `//` comment; durable rationale goes in

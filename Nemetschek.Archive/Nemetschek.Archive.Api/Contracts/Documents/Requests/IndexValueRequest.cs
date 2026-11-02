@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Nemetschek.Archive.Core.Domain.IndexFields;
 
@@ -9,9 +10,11 @@ namespace Nemetschek.Archive.Api.Contracts.Documents.Requests;
 public sealed class IndexValueRequest : IValidatableObject
 {
     /// <summary>Whether the value is text, a number or a date.</summary>
+    [Description("The kind of value this is — Text, Number or Date.")]
     public required FieldType Type { get; init; }
 
     /// <summary>The value, as text. A date is <c>yyyy-MM-dd</c>.</summary>
+    [Description("The value, always as text whatever its type. A date is yyyy-MM-dd")]
     [Required(ErrorMessage = "an index value has no 'value'")]
     public string Value { get; init; } = "";
 

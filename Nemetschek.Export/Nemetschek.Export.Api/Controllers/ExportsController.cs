@@ -17,6 +17,11 @@ public sealed class ExportsController(ExportService exportService) : ControllerB
     /// <param name="cancellationToken">Cancels the export if the caller goes away.</param>
     [HttpPost]
     [Produces("application/zip")]
+    [EndpointSummary("Export documents as a zip")]
+    [EndpointDescription(
+        "Builds a zip of the file cabinet's documents stored between from and to inclusive, then " +
+        "marks every exported document in the chosen field. A document of one part becomes a file " +
+        "named after the document.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status502BadGateway)]

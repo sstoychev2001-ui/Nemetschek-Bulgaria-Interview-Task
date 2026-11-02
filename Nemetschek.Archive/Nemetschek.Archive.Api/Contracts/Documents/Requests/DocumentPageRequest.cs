@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 
 namespace Nemetschek.Archive.Api.Contracts.Documents.Requests;
@@ -8,22 +9,26 @@ namespace Nemetschek.Archive.Api.Contracts.Documents.Requests;
 public sealed class DocumentPageRequest
 {
     /// <summary>The page to read, starting at one.</summary>
+    [Description("The page to read, starting at one. Defaults to 1.")]
     [Range(1, int.MaxValue)]
     public int Page { get; init; } = 1;
 
     /// <summary>How many documents the page should hold, capped by the configured maximum.</summary>
+    [Description("How many documents the page should hold. Defaults to 20, and is capped by the server's own maximum")]
     [Range(1, int.MaxValue)]
     public int Size { get; init; } = 20;
 
     /// <summary>
     /// The first calendar date to include, as the caller's own date. Unbounded when absent.
     /// </summary>
+    [Description("The first UTC calendar day to include, as yyyy-MM-dd. Unbounded when left out.")]
     public DateOnly? From { get; init; }
 
     /// <summary>
     /// The last calendar date to include, as the caller's own date, and included in full.
     /// Unbounded when absent.
     /// </summary>
+    [Description("The last UTC calendar day to include, as yyyy-MM-dd")]
     public DateOnly? To { get; init; }
 
     /// <summary>How many documents this page holds, within the server's maximum.</summary>
